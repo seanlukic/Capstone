@@ -3,7 +3,7 @@ import streamlit as st
 st.title("Event Setup")
 
 st.session_state.setdefault("event_name", "")
-st.session_state.setdefault("num_people", "")
+st.session_state.setdefault("num_people", 30)
 
 with st.form("event_form"):
     st.session_state["event_name"] = st.text_input("Event name", st.session_state["event_name"])
