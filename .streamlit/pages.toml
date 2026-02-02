@@ -1,0 +1,19 @@
+[[pages]]
+path = "app.py"
+name = "Home"
+icon = ":material/home:"
+
+[[pages]]
+path = "pages/1_Event_Setup.py"
+name = "Event Setup"
+icon = ":material/event:"
+
+[[pages]]
+path = "pages/2_Participants.py"
+name = "Participants"
+icon = ":material/group:"
+
+[[pages]]
+path = "pages/3_Run_and_Results.py"
+name = "Run & Results"
+icon = ":material/insights:"

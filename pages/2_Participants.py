@@ -1,87 +1,93 @@
 import streamlit as st
 import pandas as pd
 
-st.title("Participant Setup")
+from ui import inject_global_styles, render_hero, render_progress, render_start_over_button
 
-# ---- 1) Define the columns your model expects ----
-# Update these to match your real schema
+st.set_page_config(page_title="Participants | Group Formation Studio", page_icon="groups", layout="wide")
+inject_global_styles()
+render_progress(3)
+render_start_over_button("start_over_participants")
+
+st.title("Participant Setup")
+render_hero(
+    "Add or import participant data",
+    "Provide participant records, validate key fields, then continue to run your grouping logic.",
+)
+
 REQUIRED_COLS = ["Participant_ID", "Expertise", "Lived_Experience", "Minnesota"]
 
-def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure required columns exist (adds any missing as empty)."""
-    df = df.copy()
-    for c in REQUIRED_COLS:
-        if c not in df.columns:
-            df[c] = ""
-    # Keep only required columns (optional; remove if you want to allow extras)
-    df = df[REQUIRED_COLS]
-    return df
 
-# ---- 2) Choose input method ----
+def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for col in REQUIRED_COLS:
+        if col not in df.columns:
+            df[col] = ""
+    return df[REQUIRED_COLS]
+
+
 mode = st.radio(
-    "How would you like to provide participant data?",
+    "Input method",
     ["Upload Excel", "Add manually"],
-    horizontal=True
+    horizontal=True,
 )
 
 df = None
 
-# ---- 3A) Upload path ----
 if mode == "Upload Excel":
     uploaded = st.file_uploader("Upload participant Excel file", type=["xlsx"])
     if uploaded is None:
-        st.info("Upload an Excel file to continue, or switch to 'Add manually'.")
+        st.info("Upload a .xlsx file to continue, or switch to manual entry.")
         st.stop()
 
     df = pd.read_excel(uploaded)
     df = ensure_columns(df)
-
-# ---- 3B) Manual entry path ----
 else:
-    st.caption("Add participants below. You can paste from a spreadsheet, add rows, and edit cells.")
+    st.caption("Use the editor below to add rows, paste from a spreadsheet, and adjust values.")
 
-    # Initialize an empty template once
     if "manual_df" not in st.session_state:
         st.session_state["manual_df"] = pd.DataFrame(columns=REQUIRED_COLS)
 
     edited = st.data_editor(
         st.session_state["manual_df"],
-        num_rows="dynamic",           # lets user add/remove rows
+        num_rows="dynamic",
         use_container_width=True,
         key="manual_editor",
     )
 
-    # Keep session state synced
     st.session_state["manual_df"] = ensure_columns(edited)
     df = st.session_state["manual_df"]
 
-    # Optional: allow download of what they entered
     st.download_button(
-        "Download as CSV",
+        "Download manual entries (CSV)",
         df.to_csv(index=False).encode("utf-8"),
         file_name="participants.csv",
         mime="text/csv",
-        disabled=df.empty
+        disabled=df.empty,
     )
 
-# ---- 4) Validate & save to session_state ----
 df = ensure_columns(df)
 
-# Basic validation example: require at least 1 row
 if df.empty:
     st.warning("No participants yet. Add at least one row to continue.")
     st.stop()
 
-# Example: require Participant_ID not blank
 missing_ids = df["Participant_ID"].astype(str).str.strip().eq("").sum()
 if missing_ids > 0:
-    st.warning(f"{missing_ids} participant(s) are missing Participant_ID. Please fill them in.")
+    st.warning(f"{missing_ids} participant(s) are missing Participant_ID.")
 
 st.session_state["df"] = df
+
+metric1, metric2 = st.columns(2)
+metric1.metric("Participant rows", len(df))
+metric2.metric("Missing Participant_ID", int(missing_ids))
 
 st.subheader("Current Participant Data")
 st.dataframe(df, use_container_width=True)
 
-# ---- 5) Continue ----
-if st.button("Generate Groupings"):
-    st.switch_page("pages/3_Run_and_Results.py")
+left, right = st.columns(2)
+with left:
+    if st.button("Back to Event Setup"):
+        st.switch_page("pages/1_Event_Setup.py")
+with right:
+    if st.button("Generate Groupings", type="primary"):
+        st.switch_page("pages/3_Run_and_Results.py")
