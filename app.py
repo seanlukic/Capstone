@@ -8,6 +8,7 @@ st.set_page_config(page_title="Group Formation Studio", page_icon="groups", layo
 inject_global_styles()
 
 REQUIRED_COLS = ["Participant_ID", "Expertise", "Lived_Experience", "Minnesota"]
+DIVERSITY_COLS = ["Expertise", "Lived_Experience", "Minnesota"]
 
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -31,6 +32,14 @@ def start_over() -> None:
     st.rerun()
 
 
+def table_diversity_score(table_df: pd.DataFrame) -> int:
+    score = 0
+    for col in DIVERSITY_COLS:
+        if col in table_df.columns:
+            score += table_df[col].astype(str).nunique(dropna=True)
+    return int(score)
+
+
 st.session_state.setdefault("step", 1)
 st.session_state.setdefault("event_name", "")
 st.session_state.setdefault("num_people", 30)
@@ -43,10 +52,10 @@ if step > 1 and st.button("Start Over"):
 
 if step == 1:
     st.title("Group Formation Studio")
-    st.caption("Build diverse teams from spreadsheet uploads or manual participant entry")
+    st.caption("Build diverse teams from spreadsheet uploads")
     render_hero(
         "Design balanced, high-diversity groups in minutes",
-        "Start by setting event details. Then upload participants or enter them manually before generating group assignments.",
+        "Start by setting event details. Then upload participants data to generate group assignments.",
     )
     if st.button("Start Setup", type="primary"):
         go_to(2)
@@ -63,7 +72,7 @@ elif step == 2:
             event_name = st.text_input(
                 "Event name",
                 value=st.session_state["event_name"],
-                placeholder="Capstone Collaboration Day",
+                placeholder="World Cafe - Team Building Event",
             )
         with col2:
             num_people = st.number_input(
@@ -81,65 +90,40 @@ elif step == 2:
 elif step == 3:
     st.title("Participant Setup")
     render_hero(
-        "Add or import participant data",
-        "Provide participant records, validate key fields, then continue to run your grouping logic.",
+        "Import participant data",
+        "Upload participant records, validate key fields, then continue to run your grouping logic.",
     )
-    mode = st.radio("Input method", ["Upload file", "Add manually"], horizontal=True)
-    df = None
-    if mode == "Upload file":
-        uploaded = st.file_uploader("Upload participant file", type=["xlsx", "csv"])
-        if uploaded is None:
-            st.info("Upload a .csv or .xlsx file to continue, or switch to manual entry.")
-            st.stop()
-        if uploaded.name.lower().endswith(".csv"):
-            df = ensure_columns(pd.read_csv(uploaded))
-        else:
-            df = ensure_columns(pd.read_excel(uploaded))
+    uploaded = st.file_uploader("Upload participant file", type=["xlsx", "xls", "csv"])
+    if uploaded is None:
+        st.info("Upload a .csv or .xlsx file to continue.")
+        st.stop()
+    if uploaded.name.lower().endswith(".csv"):
+        raw_df = pd.read_csv(uploaded)
     else:
-        st.caption("Use the editor below to add rows, paste from a spreadsheet, and adjust values.")
-        if "manual_df" not in st.session_state:
-            st.session_state["manual_df"] = pd.DataFrame(columns=REQUIRED_COLS)
-        edited = st.data_editor(
-            st.session_state["manual_df"],
-            num_rows="dynamic",
-            use_container_width=True,
-            key="manual_editor",
-        )
-        st.session_state["manual_df"] = ensure_columns(edited)
-        df = st.session_state["manual_df"]
-        st.download_button(
-            "Download manual entries (CSV)",
-            df.to_csv(index=False).encode("utf-8"),
-            file_name="participants.csv",
-            mime="text/csv",
-            disabled=df.empty,
-        )
+        raw_df = pd.read_excel(uploaded)
+    st.success(f"Loaded `{uploaded.name}` with {len(raw_df)} rows.")
+    st.session_state["uploaded_df"] = raw_df
+    df = ensure_columns(raw_df)
 
     df = ensure_columns(df)
     if df.empty:
         st.warning("No participants yet. Add at least one row to continue.")
         st.stop()
 
-    missing_ids = df["Participant_ID"].astype(str).str.strip().eq("").sum()
-    if missing_ids > 0:
-        st.warning(f"{missing_ids} participant(s) are missing Participant_ID.")
-
     st.session_state["df"] = df
-    metric1, metric2 = st.columns(2)
-    metric1.metric("Participant rows", len(df))
-    metric2.metric("Missing Participant_ID", int(missing_ids))
-    if len(df) < 24 or len(df) > 36:
-        st.error("SolverV2 backend expects 24-36 participants (6 tables, size 4-6).")
-        st.stop()
+    st.metric("Participant rows", len(df))
     st.subheader("Current Participant Data")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(st.session_state["uploaded_df"], use_container_width=True)
+    invalid_count = len(df) < 24 or len(df) > 36
+    if invalid_count:
+        st.error("SolverV2 backend expects 24-36 participants (6 tables, size 4-6).")
 
     left, right = st.columns(2)
     with left:
         if st.button("Back to Event Setup"):
             go_to(2)
     with right:
-        if st.button("Generate Groupings", type="primary"):
+        if st.button("Generate Groupings", type="primary", disabled=invalid_count):
             with st.spinner("Solving group assignments..."):
                 try:
                     participant_results, schedule_results, objective_value = solve_solver_v2(df)
@@ -163,16 +147,31 @@ else:
     if participant_results is None or schedule_results is None:
         st.error("No grouping results found. Go back and click Generate Groupings.")
         st.stop()
-    st.success(f"Solved with Gurobi optimizer. Objective value: {objective_value:.1f}")
+    st.success("Solved with Gurobi optimizer.")
+    st.metric("Diversity Score", f"{objective_value:.1f}")
 
-    st.subheader("Participant Schedule")
+    all_rounds = sorted(schedule_results["Round"].unique().tolist())
+    for round_number in all_rounds:
+        st.subheader(f"Round {round_number}")
+        round_df = schedule_results[schedule_results["Round"] == round_number]
+        table_numbers = sorted(round_df["Table"].unique().tolist())
+        cols = st.columns(3)
+        for idx, table_number in enumerate(table_numbers):
+            table_rows = round_df[round_df["Table"] == table_number]
+            person_indices = table_rows["Person_Index"].astype(int).tolist()
+            table_people = table_rows["Participant_ID"].astype(str).tolist()
+            table_df = participant_results.iloc[person_indices]
+            score = table_diversity_score(table_df)
+
+            with cols[idx % 3]:
+                with st.container(border=True):
+                    st.markdown(f"**Table {table_number}**")
+                    st.caption(f"Diversity score: {score}")
+                    for person in table_people:
+                        st.write(f"- {person}")
+
     schedule_cols = ["Participant_ID", "Round_1_Table", "Round_2_Table", "Round_3_Table"]
     display_schedule = participant_results[schedule_cols].sort_values("Participant_ID").reset_index(drop=True)
-    st.dataframe(display_schedule, use_container_width=True)
-
-    st.subheader("Round-by-Round Table Assignments")
-    st.dataframe(schedule_results, use_container_width=True)
-
     csv_data = display_schedule.to_csv(index=False).encode("utf-8")
     st.download_button(
         "Download Group Assignments (CSV)",

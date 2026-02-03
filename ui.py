@@ -100,6 +100,16 @@ def inject_global_styles() -> None:
             background: #0f1728;
         }
 
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            background: var(--card);
+            border: 1px solid var(--border) !important;
+        }
+
+        [data-testid="stMarkdownContainer"] ul,
+        [data-testid="stMarkdownContainer"] li {
+            color: #ffffff !important;
+        }
+
         [data-testid="stSidebar"] {
             display: none !important;
         }
@@ -108,7 +118,7 @@ def inject_global_styles() -> None:
             display: none !important;
         }
 
-        label, p, span, div {
+        label, p, span, div, li, strong {
             color: var(--text);
         }
         </style>
