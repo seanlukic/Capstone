@@ -291,6 +291,7 @@ def solve_solver_v2(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float
     I = params["I"]
     T = params["T"]
     R = params["R"]
+    work_df["Person_Index"] = list(I)
 
     row_assignments = {}
     round_table_rows = []

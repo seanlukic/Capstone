@@ -13,6 +13,26 @@ DIVERSITY_COLS = ["Expertise", "Lived_Experience", "Minnesota"]
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    # Use Person_ID from source files when Participant_ID is missing/blank.
+    alt_id_cols = ["Person_ID", "person_id", "personid", "PersonID"]
+    if "Participant_ID" not in df.columns:
+        for alt in alt_id_cols:
+            if alt in df.columns:
+                df["Participant_ID"] = df[alt]
+                break
+    elif df["Participant_ID"].astype(str).str.strip().eq("").all():
+        for alt in alt_id_cols:
+            if alt in df.columns:
+                df["Participant_ID"] = df[alt]
+                break
+    else:
+        # Fill any blank Participant_ID cells from Person_ID when available.
+        blank_mask = df["Participant_ID"].astype(str).str.strip().eq("")
+        for alt in alt_id_cols:
+            if alt in df.columns:
+                df.loc[blank_mask, "Participant_ID"] = df.loc[blank_mask, alt]
+                break
+
     for col in REQUIRED_COLS:
         if col not in df.columns:
             df[col] = ""
@@ -159,7 +179,6 @@ else:
         for idx, table_number in enumerate(table_numbers):
             table_rows = round_df[round_df["Table"] == table_number]
             person_indices = table_rows["Person_Index"].astype(int).tolist()
-            table_people = table_rows["Participant_ID"].astype(str).tolist()
             table_df = participant_results.iloc[person_indices]
             score = table_diversity_score(table_df)
 
@@ -167,11 +186,15 @@ else:
                 with st.container(border=True):
                     st.markdown(f"**Table {table_number}**")
                     st.caption(f"Diversity score: {score}")
-                    for person in table_people:
-                        st.write(f"- {person}")
+                    for _, person_row in table_df.iterrows():
+                        person_id = str(person_row.get("Participant_ID", "")).strip()
+                        st.write(f"- Person ID: {person_id}")
 
     schedule_cols = ["Participant_ID", "Round_1_Table", "Round_2_Table", "Round_3_Table"]
-    display_schedule = participant_results[schedule_cols].sort_values("Participant_ID").reset_index(drop=True)
+    if "Person_Index" in participant_results.columns:
+        display_schedule = participant_results.sort_values("Person_Index")[schedule_cols].reset_index(drop=True)
+    else:
+        display_schedule = participant_results[schedule_cols].reset_index(drop=True)
     csv_data = display_schedule.to_csv(index=False).encode("utf-8")
     st.download_button(
         "Download Group Assignments (CSV)",
