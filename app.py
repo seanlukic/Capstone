@@ -146,7 +146,11 @@ elif step == 3:
         if st.button("Generate Groupings", type="primary", disabled=invalid_count):
             with st.spinner("Solving group assignments..."):
                 try:
-                    participant_results, schedule_results, objective_value = solve_solver_v2(df)
+                    participant_results, schedule_results, objective_value = solve_solver_v2(
+                        df,
+                        debug=True,
+                        time_limit_seconds=120.0,
+                    )
                 except Exception as exc:
                     st.error(f"Solver failed: {exc}")
                     st.stop()
@@ -167,7 +171,6 @@ else:
     if participant_results is None or schedule_results is None:
         st.error("No grouping results found. Go back and click Generate Groupings.")
         st.stop()
-    st.success("Solved with Gurobi optimizer.")
     st.metric("Diversity Score", f"{objective_value:.1f}")
 
     all_rounds = sorted(schedule_results["Round"].unique().tolist())
