@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 
 from solver_backend import solve_solver_v2
 from ui import inject_global_styles, render_hero, render_progress
@@ -9,6 +10,7 @@ inject_global_styles()
 
 REQUIRED_COLS = ["Participant_ID", "Expertise", "Lived_Experience", "Minnesota"]
 DIVERSITY_COLS = ["Expertise", "Lived_Experience", "Minnesota"]
+TEMPLATE_PATH = Path(r"c:\Users\seanl\Spring_2026\Capstone 2\User_Input_Template_2.2.xlsx")
 
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -58,6 +60,24 @@ def table_diversity_score(table_df: pd.DataFrame) -> int:
         if col in table_df.columns:
             score += table_df[col].astype(str).nunique(dropna=True)
     return int(score)
+
+
+def read_participants_sheet(uploaded_file) -> pd.DataFrame:
+    workbook = pd.ExcelFile(uploaded_file)
+    sheet_lookup = {name.strip().lower(): name for name in workbook.sheet_names}
+
+    if "participants" in sheet_lookup:
+        return pd.read_excel(workbook, sheet_name=sheet_lookup["participants"])
+
+    # Fallback: accept sheets with names like "participants data".
+    for normalized_name, original_name in sheet_lookup.items():
+        if "participant" in normalized_name:
+            return pd.read_excel(workbook, sheet_name=original_name)
+
+    raise ValueError(
+        "Could not find a 'Participants' sheet in the uploaded file. "
+        f"Available sheets: {', '.join(workbook.sheet_names)}"
+    )
 
 
 st.session_state.setdefault("step", 1)
@@ -113,14 +133,26 @@ elif step == 3:
         "Import participant data",
         "Upload participant records, validate key fields, then continue to run your grouping logic.",
     )
-    uploaded = st.file_uploader("Upload participant file", type=["xlsx", "xls", "csv"])
-    if uploaded is None:
-        st.info("Upload a .csv or .xlsx file to continue.")
-        st.stop()
-    if uploaded.name.lower().endswith(".csv"):
-        raw_df = pd.read_csv(uploaded)
+    if TEMPLATE_PATH.exists():
+        template_bytes = TEMPLATE_PATH.read_bytes()
+        st.download_button(
+            "Download Participant Template (Excel)",
+            data=template_bytes,
+            file_name=TEMPLATE_PATH.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     else:
-        raw_df = pd.read_excel(uploaded)
+        st.warning(f"Template file not found: `{TEMPLATE_PATH}`")
+
+    uploaded = st.file_uploader("Upload completed template", type=["xlsx", "xls"])
+    if uploaded is None:
+        st.info("Download the template above, fill it out, then upload the completed Excel file.")
+        st.stop()
+    try:
+        raw_df = read_participants_sheet(uploaded)
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
     st.success(f"Loaded `{uploaded.name}` with {len(raw_df)} rows.")
     st.session_state["uploaded_df"] = raw_df
     df = ensure_columns(raw_df)

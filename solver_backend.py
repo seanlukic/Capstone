@@ -3,22 +3,37 @@ import numpy as np  # Numerical arrays for HiGHS row building
 import pandas as pd  # Import pandas for data manipulation
 
 
-def _prepare_parameters(df: pd.DataFrame) -> dict:
+def _extract_attribute_values(df: pd.DataFrame, column: str) -> list[str]:
+    if column not in df.columns:
+        return []
+    values = (
+        df[column]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    values = values[values.ne("")]
+    return values.drop_duplicates().tolist()
+
+
+def _prepare_parameters(
+    df: pd.DataFrame,
+    *,
+    v_target: float = 5.0,
+    lam: float = 50.0,
+    w1_value: float = 10.0,
+    w2_value: float = 20.0,
+    w1_bar_value: float | None = None,
+    w2_bar_value: float | None = None,
+    v_bar: dict | None = None,
+    v_under: dict | None = None,
+) -> dict:
     work_df = df.copy().reset_index(drop=True)  # Work on a copy to avoid mutating user data
 
     # SETS
     # Characteristics from Maass World Cafe model
     K = ["Expertise", "Lived_Experience", "Minnesota"]
-    Ak = {
-        "Expertise": ["Social_Science", "Computational_Math", "Real_World"],
-        "Lived_Experience": [],
-        "Minnesota": [],
-    }
-
-    if "Lived_Experience" in work_df.columns:  # Check if Lived_Experience column exists
-        Ak["Lived_Experience"] = work_df["Lived_Experience"].dropna().astype(str).unique().tolist()  # Get unique non-null values
-    if "Minnesota" in work_df.columns:  # Check if Minnesota column exists
-        Ak["Minnesota"] = work_df["Minnesota"].dropna().astype(str).unique().tolist()  # Get unique non-null values
+    Ak = {k: _extract_attribute_values(work_df, k) for k in K}
 
     I = range(len(work_df))  # Set of people
     T = range(6)  # Set of tables
@@ -27,7 +42,8 @@ def _prepare_parameters(df: pd.DataFrame) -> dict:
     # PARAMETERS
     l = 4  # Minimum table size
     u = 6  # Maximum table size
-    lam = 50  # Penalty weight for people meeting repeatedly
+    w1_bar_default = float(w1_value if w1_bar_value is None else w1_bar_value)
+    w2_bar_default = float(w2_value if w2_bar_value is None else w2_bar_value)
 
     b = {}  # b_iak: 1 if person i has attribute a of characteristic k
     for i in I:  # Loop through all people
@@ -38,49 +54,65 @@ def _prepare_parameters(df: pd.DataFrame) -> dict:
     # Populate b based on uploaded/manual dataframe
     for idx, row in work_df.iterrows():  # Loop through each row in dataframe
         i = idx
-        if "Expertise" in work_df.columns and pd.notna(row["Expertise"]):  # For Expertise
-            expertise_val = str(row["Expertise"])
-            if expertise_val in Ak["Expertise"]:
-                b[i, "Expertise", expertise_val] = 1
-        if "Lived_Experience" in work_df.columns and pd.notna(row["Lived_Experience"]):  # For Lived_Experience
-            lived_val = str(row["Lived_Experience"])
-            if lived_val in Ak["Lived_Experience"]:
-                b[i, "Lived_Experience", lived_val] = 1
-        if "Minnesota" in work_df.columns and pd.notna(row["Minnesota"]):  # For Minnesota
-            mn_val = str(row["Minnesota"])
-            if mn_val in Ak["Minnesota"]:
-                b[i, "Minnesota", mn_val] = 1
+        for k in K:
+            if k in work_df.columns and pd.notna(row[k]):
+                val = str(row[k]).strip()
+                if val in Ak[k]:
+                    b[i, k, val] = 1
 
     v = {}  # v_akt: target number of people with attribute a at table t
     for k in K:  # Loop through all characteristics
         for a in Ak[k]:  # Loop through all attributes of characteristic k
             for t in T:  # Loop through all tables
-                v[k, a, t] = 5
+                v[k, a, t] = float(v_target)
+
+    # Optional hard bounds: off by default unless explicitly provided.
+    v_bar_dict = None
+    if v_bar is not None:
+        v_bar_dict = {}
+        for k in K:
+            for a in Ak[k]:
+                for t in T:
+                    key = (k, a, t)
+                    if key not in v_bar:
+                        raise ValueError(f"Missing hard upper bound for {key}")
+                    v_bar_dict[key] = float(v_bar[key])
+
+    v_under_dict = None
+    if v_under is not None:
+        v_under_dict = {}
+        for k in K:
+            for a in Ak[k]:
+                for t in T:
+                    key = (k, a, t)
+                    if key not in v_under:
+                        raise ValueError(f"Missing hard lower bound for {key}")
+                    v_under_dict[key] = float(v_under[key])
 
     # Penalty weights for overuse and underuse
     w1_bar = {}
     for k in K:  # Loop through all characteristics
         for a in Ak[k]:  # Loop through all attributes of characteristic k
             for t in T:  # Loop through all tables
-                w1_bar[k, a, t] = 10
+                w1_bar[k, a, t] = w1_bar_default
 
     w2_bar = {}
     for k in K:  # Loop through all characteristics
         for a in Ak[k]:  # Loop through all attributes of characteristic k
             for t in T:  # Loop through all tables
-                w2_bar[k, a, t] = 20
+                w2_bar[k, a, t] = w2_bar_default
 
     w1 = {}
     for k in K:  # Loop through all characteristics
         for a in Ak[k]:  # Loop through all attributes of characteristic k
             for t in T:  # Loop through all tables
-                w1[k, a, t] = 10
+                w1[k, a, t] = float(w1_value)
 
     w2 = {}
     for k in K:  # Loop through all characteristics
         for a in Ak[k]:  # Loop through all attributes of characteristic k
             for t in T:  # Loop through all tables
-                w2[k, a, t] = 20
+                w2[k, a, t] = float(w2_value)
 
     return {
         "df": work_df,
@@ -91,9 +123,11 @@ def _prepare_parameters(df: pd.DataFrame) -> dict:
         "R": R,
         "l": l,
         "u": u,
-        "lam": lam,
+        "lam": float(lam),
         "b": b,
         "v": v,
+        "v_bar": v_bar_dict,
+        "v_under": v_under_dict,
         "w1_bar": w1_bar,
         "w2_bar": w2_bar,
         "w1": w1,
@@ -116,7 +150,6 @@ def _add_var(
         model.changeColIntegrality(idx, integrality)
     return idx
 
-
 def _add_row(model: highspy.Highs, lower: float, upper: float, indices: list[int], values: list[float]) -> None:
     num_nz = len(indices)
     idx = np.array(indices, dtype=np.int32)
@@ -135,6 +168,8 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     lam = params["lam"]
     b = params["b"]
     v = params["v"]
+    v_bar = params["v_bar"]
+    v_under = params["v_under"]
     w1_bar = params["w1_bar"]
     w2_bar = params["w2_bar"]
     w1 = params["w1"]
@@ -293,26 +328,32 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                     values.extend([-1.0, -1.0, 1.0, 1.0])
                     _add_row(model, float(v[k, a, t]), float(v[k, a, t]), indices, values)  # Actual count +/- deviations = target
 
-    # Constraint 7: First overuse limited to 1
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
-                    _add_row(model, -inf, 1.0, [E1_bar[k, a, t, r]], [1.0])  # Binary constraint on first overuse
+    # Optional hard bounds from updated model spec; disabled unless provided.
+    if v_bar is not None:
+        for k in K:
+            for a in Ak[k]:
+                for t in T:
+                    for r in R:
+                        indices = []
+                        values = []
+                        for i in I:
+                            if b[i, k, a] != 0:
+                                indices.append(Y[i, t, r])
+                                values.append(float(b[i, k, a]))
+                        _add_row(model, -inf, float(v_bar[k, a, t]), indices, values)
 
-    # Constraints 8-11: Non-negativity constraints
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
-                    _add_row(model, 0.0, inf, [E1_bar[k, a, t, r]], [1.0])  # E1_bar non-negative
-                    _add_row(model, 0.0, inf, [E2_bar[k, a, t, r]], [1.0])  # E2_bar non-negative
-                    _add_row(model, 0.0, inf, [E1[k, a, t, r]], [1.0])  # E1 non-negative
-                    _add_row(model, 0.0, inf, [E2[k, a, t, r]], [1.0])  # E2 non-negative
-
-    # Code only works when constraints 12 and 13 are commented out in original model.
-    # Constraint 12: Hard upper bound on attribute count (left out by design)
-    # Constraint 13: Hard lower bound on attribute count (left out by design)
+    if v_under is not None:
+        for k in K:
+            for a in Ak[k]:
+                for t in T:
+                    for r in R:
+                        indices = []
+                        values = []
+                        for i in I:
+                            if b[i, k, a] != 0:
+                                indices.append(Y[i, t, r])
+                                values.append(float(b[i, k, a]))
+                        _add_row(model, float(v_under[k, a, t]), inf, indices, values)
 
     # Constraint 14: Pair meeting linearization
     for i in I:  # Loop through all people
@@ -340,8 +381,26 @@ def solve_solver_v2(
     df: pd.DataFrame,
     debug: bool = False,
     time_limit_seconds: float | None = None,
+    v_target: float = 5.0,
+    lam: float = 50.0,
+    w1_value: float = 10.0,
+    w2_value: float = 20.0,
+    w1_bar_value: float | None = None,
+    w2_bar_value: float | None = None,
+    v_bar: dict | None = None,
+    v_under: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float]:
-    params = _prepare_parameters(df)
+    params = _prepare_parameters(
+        df,
+        v_target=v_target,
+        lam=lam,
+        w1_value=w1_value,
+        w2_value=w2_value,
+        w1_bar_value=w1_bar_value,
+        w2_bar_value=w2_bar_value,
+        v_bar=v_bar,
+        v_under=v_under,
+    )
     model, Y, W = _build_model(params)
     model.setOptionValue("output_flag", bool(debug))
     if time_limit_seconds is not None:
