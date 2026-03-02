@@ -11,7 +11,7 @@ inject_global_styles()
 
 REQUIRED_COLS = ["Participant_ID", "Expertise", "Lived_Experience", "Minnesota"]
 DIVERSITY_COLS = ["Expertise", "Lived_Experience", "Minnesota"]
-TEMPLATE_PATH = Path(__file__).parent / "User_Input__Template_2.2.xlsx"
+TEMPLATE_PATH = Path(__file__).parent / "User_Input_Template_2.2.xlsx"
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
