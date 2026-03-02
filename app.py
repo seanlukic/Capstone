@@ -65,14 +65,15 @@ def table_diversity_score(table_df: pd.DataFrame) -> int:
 def read_participants_sheet(uploaded_file) -> pd.DataFrame:
     workbook = pd.ExcelFile(uploaded_file)
     sheet_lookup = {name.strip().lower(): name for name in workbook.sheet_names}
+    header_row_index = 1  # First row is formatting/info; second row contains headers.
 
     if "participants" in sheet_lookup:
-        return pd.read_excel(workbook, sheet_name=sheet_lookup["participants"])
+        return pd.read_excel(workbook, sheet_name=sheet_lookup["participants"], header=header_row_index)
 
     # Fallback: accept sheets with names like "participants data".
     for normalized_name, original_name in sheet_lookup.items():
         if "participant" in normalized_name:
-            return pd.read_excel(workbook, sheet_name=original_name)
+            return pd.read_excel(workbook, sheet_name=original_name, header=header_row_index)
 
     raise ValueError(
         "Could not find a 'Participants' sheet in the uploaded file. "
@@ -169,6 +170,8 @@ elif step == 3:
     invalid_count = len(df) < 24 or len(df) > 36
     if invalid_count:
         st.error("SolverV2 backend expects 24-36 participants (6 tables, size 4-6).")
+    else:
+        st.info("Group assignments typically take about 10-60 seconds to generate. In harder cases, it can take up to 2 minutes.")
 
     left, right = st.columns(2)
     with left:
