@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import inspect
 
 import pandas as pd
 import streamlit as st
@@ -368,6 +369,41 @@ def table_diversity_score(table_df: pd.DataFrame, diversity_cols: list[str]) -> 
     return int(score)
 
 
+def _run_solver_with_compatibility(
+    participants_df: pd.DataFrame,
+    characteristics: list[str],
+    event_setup: dict,
+    parsed: dict,
+    locks: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame, float, float | None]:
+    signature = inspect.signature(solve_solver_v2)
+    supports_dynamic_args = "characteristics" in signature.parameters
+
+    if supports_dynamic_args:
+        return solve_solver_v2(
+            participants_df,
+            debug=True,
+            time_limit_seconds=120.0,
+            characteristics=characteristics,
+            num_tables=event_setup["number_of_tables"],
+            num_rounds=event_setup["number_of_rounds"],
+            min_people_per_table=event_setup["min_people_per_table"],
+            max_people_per_table=event_setup["max_people_per_table"],
+            trait_targets=parsed["trait_targets"],
+            trait_max_allowed=parsed["trait_max_allowed"],
+            trait_min_required=parsed["trait_min_required"],
+            locked_tables=locks,
+        )
+
+    # Legacy solver signature compatibility (older deployed module).
+    participant_results, schedule_results, objective_value = solve_solver_v2(
+        participants_df,
+        debug=True,
+        time_limit_seconds=120.0,
+    )
+    return participant_results, schedule_results, objective_value, None
+
+
 st.session_state.setdefault("step", 1)
 st.session_state.setdefault("event_name", "")
 
@@ -486,19 +522,12 @@ elif step == 3:
         if st.button("Generate Groupings", type="primary", disabled=invalid_count):
             with st.spinner("Solving group assignments..."):
                 try:
-                    participant_results, schedule_results, objective_value, optimality_gap = solve_solver_v2(
-                        participants_df,
-                        debug=True,
-                        time_limit_seconds=120.0,
+                    participant_results, schedule_results, objective_value, optimality_gap = _run_solver_with_compatibility(
+                        participants_df=participants_df,
                         characteristics=characteristics,
-                        num_tables=event_setup["number_of_tables"],
-                        num_rounds=event_setup["number_of_rounds"],
-                        min_people_per_table=event_setup["min_people_per_table"],
-                        max_people_per_table=event_setup["max_people_per_table"],
-                        trait_targets=parsed["trait_targets"],
-                        trait_max_allowed=parsed["trait_max_allowed"],
-                        trait_min_required=parsed["trait_min_required"],
-                        locked_tables=locks,
+                        event_setup=event_setup,
+                        parsed=parsed,
+                        locks=locks,
                     )
                 except Exception as exc:
                     st.error(f"Solver failed: {exc}")
