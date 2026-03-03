@@ -1,8 +1,5 @@
 streamlit
 pandas
 numpy
-fastapi
-uvicorn
-python-multipart
 openpyxl
 highspy

@@ -143,12 +143,3 @@ def render_progress(current_step: int, total_steps: int = 4) -> None:
     progress_value = max(0.0, min(1.0, current_step / total_steps))
     st.progress(progress_value)
     st.caption(f"Step {current_step} of {total_steps}")
-
-
-def render_start_over_button(button_key: str) -> None:
-    if st.button("Start Over", key=button_key):
-        keys_to_keep = {"theme"}
-        for key in list(st.session_state.keys()):
-            if key not in keys_to_keep:
-                del st.session_state[key]
-        st.switch_page("app.py")
