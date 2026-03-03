@@ -1,19 +1,48 @@
-import highspy  # HiGHS optimization library (highspy)
-import numpy as np  # Numerical arrays for HiGHS row building
-import pandas as pd  # Import pandas for data manipulation
+import highspy
+import numpy as np
+import pandas as pd
 
 
 def _extract_attribute_values(df: pd.DataFrame, column: str) -> list[str]:
     if column not in df.columns:
         return []
-    values = (
-        df[column]
-        .dropna()
-        .astype(str)
-        .str.strip()
-    )
+    values = df[column].dropna().astype(str).str.strip()
     values = values[values.ne("")]
     return values.drop_duplicates().tolist()
+
+
+def _clean_text(value) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _normalize_trait_dict(raw: dict | None) -> dict[tuple[str, str], float]:
+    out: dict[tuple[str, str], float] = {}
+    if not raw:
+        return out
+
+    for key, value in raw.items():
+        if isinstance(key, tuple) and len(key) == 2:
+            characteristic = _clean_text(key[0])
+            trait = _clean_text(key[1])
+        else:
+            text_key = _clean_text(key)
+            if "|" not in text_key:
+                continue
+            characteristic, trait = [part.strip() for part in text_key.split("|", 1)]
+
+        if not characteristic or not trait:
+            continue
+
+        try:
+            numeric_value = float(value)
+        except Exception:
+            continue
+
+        out[(characteristic, trait)] = numeric_value
+
+    return out
 
 
 def _prepare_parameters(
@@ -27,32 +56,79 @@ def _prepare_parameters(
     w2_bar_value: float | None = None,
     v_bar: dict | None = None,
     v_under: dict | None = None,
+    characteristics: list[str] | None = None,
+    num_tables: int = 6,
+    num_rounds: int = 3,
+    min_people_per_table: int = 4,
+    max_people_per_table: int = 6,
+    trait_targets: dict | None = None,
+    trait_max_allowed: dict | None = None,
+    trait_min_required: dict | None = None,
+    locked_tables: dict | None = None,
 ) -> dict:
-    work_df = df.copy().reset_index(drop=True)  # Work on a copy to avoid mutating user data
+    work_df = df.copy().reset_index(drop=True)
 
-    # SETS
-    # Characteristics from Maass World Cafe model
-    K = ["Expertise", "Lived_Experience", "Minnesota"]
+    if "Participant_ID" not in work_df.columns:
+        work_df["Participant_ID"] = [f"AUTO_{i + 1}" for i in range(len(work_df))]
+
+    if "Name" not in work_df.columns:
+        work_df["Name"] = ""
+
+    provided_characteristics = []
+    if characteristics:
+        for col in characteristics:
+            text = _clean_text(col)
+            if text and text not in provided_characteristics:
+                provided_characteristics.append(text)
+
+    if provided_characteristics:
+        K = provided_characteristics
+    else:
+        excluded = {"participant_id", "name", "person_index"}
+        K = []
+        for col in work_df.columns:
+            col_name = str(col)
+            lowered = col_name.strip().lower()
+            if lowered in excluded:
+                continue
+            if lowered.startswith("round_") and lowered.endswith("_table"):
+                continue
+            if lowered.startswith("locked_table"):
+                continue
+            K.append(col_name)
+
+    for k in K:
+        if k not in work_df.columns:
+            work_df[k] = ""
+
+    trait_targets_map = _normalize_trait_dict(trait_targets)
+    trait_max_map = _normalize_trait_dict(trait_max_allowed)
+    trait_min_map = _normalize_trait_dict(trait_min_required)
+
     Ak = {k: _extract_attribute_values(work_df, k) for k in K}
+    for characteristic, trait in list(trait_targets_map.keys()) + list(trait_max_map.keys()) + list(trait_min_map.keys()):
+        if characteristic in Ak and trait not in Ak[characteristic]:
+            Ak[characteristic].append(trait)
 
-    I = range(len(work_df))  # Set of people
-    T = range(6)  # Set of tables
-    R = range(3)  # Set of rounds
+    I = range(len(work_df))
+    T = range(max(1, int(num_tables)))
+    R = range(max(1, int(num_rounds)))
 
-    # PARAMETERS
-    l = 4  # Minimum table size
-    u = 6  # Maximum table size
+    l = max(1, int(min_people_per_table))
+    u = max(1, int(max_people_per_table))
+    if l > u:
+        raise ValueError(f"Invalid table size bounds: min={l} > max={u}")
+
     w1_bar_default = float(w1_value if w1_bar_value is None else w1_bar_value)
     w2_bar_default = float(w2_value if w2_bar_value is None else w2_bar_value)
 
-    b = {}  # b_iak: 1 if person i has attribute a of characteristic k
-    for i in I:  # Loop through all people
-        for k in K:  # Loop through all characteristics
-            for a in Ak[k]:  # Loop through all attributes of characteristic k
+    b = {}
+    for i in I:
+        for k in K:
+            for a in Ak[k]:
                 b[i, k, a] = 0
 
-    # Populate b based on uploaded/manual dataframe
-    for idx, row in work_df.iterrows():  # Loop through each row in dataframe
+    for idx, row in work_df.iterrows():
         i = idx
         for k in K:
             if k in work_df.columns and pd.notna(row[k]):
@@ -60,13 +136,13 @@ def _prepare_parameters(
                 if val in Ak[k]:
                     b[i, k, val] = 1
 
-    v = {}  # v_akt: target number of people with attribute a at table t
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                v[k, a, t] = float(v_target)
+    v = {}
+    for k in K:
+        for a in Ak[k]:
+            target_value = float(trait_targets_map.get((k, a), v_target))
+            for t in T:
+                v[k, a, t] = target_value
 
-    # Optional hard bounds: off by default unless explicitly provided.
     v_bar_dict = None
     if v_bar is not None:
         v_bar_dict = {}
@@ -77,6 +153,15 @@ def _prepare_parameters(
                     if key not in v_bar:
                         raise ValueError(f"Missing hard upper bound for {key}")
                     v_bar_dict[key] = float(v_bar[key])
+
+    if trait_max_map:
+        if v_bar_dict is None:
+            v_bar_dict = {}
+        for (k, a), max_allowed in trait_max_map.items():
+            if k not in Ak or a not in Ak[k]:
+                continue
+            for t in T:
+                v_bar_dict[k, a, t] = float(max_allowed)
 
     v_under_dict = None
     if v_under is not None:
@@ -89,30 +174,46 @@ def _prepare_parameters(
                         raise ValueError(f"Missing hard lower bound for {key}")
                     v_under_dict[key] = float(v_under[key])
 
-    # Penalty weights for overuse and underuse
+    if trait_min_map:
+        if v_under_dict is None:
+            v_under_dict = {}
+        for (k, a), min_required in trait_min_map.items():
+            if k not in Ak or a not in Ak[k]:
+                continue
+            for t in T:
+                v_under_dict[k, a, t] = float(min_required)
+
     w1_bar = {}
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                w1_bar[k, a, t] = w1_bar_default
-
     w2_bar = {}
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                w2_bar[k, a, t] = w2_bar_default
-
     w1 = {}
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                w1[k, a, t] = float(w1_value)
-
     w2 = {}
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                w1_bar[k, a, t] = w1_bar_default
+                w2_bar[k, a, t] = w2_bar_default
+                w1[k, a, t] = float(w1_value)
                 w2[k, a, t] = float(w2_value)
+
+    locked_indices = {}
+    if locked_tables:
+        id_to_index = {
+            _clean_text(work_df.at[i, "Participant_ID"]): i
+            for i in I
+        }
+        for participant_id, table_value in locked_tables.items():
+            pid = _clean_text(participant_id)
+            if not pid:
+                continue
+            if pid not in id_to_index:
+                continue
+            try:
+                table_number = int(float(table_value))
+            except Exception:
+                continue
+            if table_number < 1 or table_number > len(T):
+                continue
+            locked_indices[id_to_index[pid]] = table_number - 1
 
     return {
         "df": work_df,
@@ -132,6 +233,7 @@ def _prepare_parameters(
         "w2_bar": w2_bar,
         "w1": w1,
         "w2": w2,
+        "locked_indices": locked_indices,
     }
 
 
@@ -149,6 +251,7 @@ def _add_var(
     if integrality != highspy.HighsVarType.kContinuous:
         model.changeColIntegrality(idx, integrality)
     return idx
+
 
 def _add_row(model: highspy.Highs, lower: float, upper: float, indices: list[int], values: list[float]) -> None:
     num_nz = len(indices)
@@ -174,150 +277,146 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     w2_bar = params["w2_bar"]
     w1 = params["w1"]
     w2 = params["w2"]
+    locked_indices = params["locked_indices"]
 
-    model = highspy.Highs()  # Create HiGHS model object
+    model = highspy.Highs()
     model.setOptionValue("output_flag", False)
     model.changeObjectiveSense(highspy.ObjSense.kMinimize)
 
     inf = highspy.kHighsInf
 
-    # DECISION VARIABLES
-    # Y_itr: 1 if person i is at table t in round r
-    Y = {}  # Y_itr: Assignment variables
-    for i in I:  # Loop through all people
-        for t in T:  # Loop through all tables
-            for r in R:  # Loop through all rounds
+    Y = {}
+    for i in I:
+        for t in T:
+            for r in R:
                 Y[i, t, r] = _add_var(
                     model,
                     lb=0.0,
                     ub=1.0,
                     integrality=highspy.HighsVarType.kInteger,
-                )  # 1 if person i is at table t in round r
+                )
 
-    W = {}  # W_tr: Table usage variables
-    for t in T:  # Loop through all tables
-        for r in R:  # Loop through all rounds
+    W = {}
+    for t in T:
+        for r in R:
             W[t, r] = _add_var(
                 model,
                 lb=0.0,
                 ub=1.0,
                 integrality=highspy.HighsVarType.kInteger,
-            )  # 1 if table t is used in round r
+            )
 
-    E1_bar = {}  # E1_bar_aktr: Binary variable for first overuse
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
+    E1_bar = {}
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                for r in R:
                     E1_bar[k, a, t, r] = _add_var(
                         model,
                         lb=0.0,
                         ub=1.0,
                         cost=w1_bar[k, a, t],
                         integrality=highspy.HighsVarType.kInteger,
-                    )  # 1 if attribute a is overused once
+                    )
 
-    E2_bar = {}  # E2_bar_aktr: Number of additional uses beyond first overuse
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
+    E2_bar = {}
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                for r in R:
                     E2_bar[k, a, t, r] = _add_var(
                         model,
                         lb=0.0,
                         ub=inf,
                         cost=w2_bar[k, a, t],
                         integrality=highspy.HighsVarType.kInteger,
-                    )  # Number of additional overuses
+                    )
 
-    E1 = {}  # E1_aktr: Binary variable for first underuse
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
+    E1 = {}
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                for r in R:
                     E1[k, a, t, r] = _add_var(
                         model,
                         lb=0.0,
                         ub=1.0,
                         cost=w1[k, a, t],
                         integrality=highspy.HighsVarType.kInteger,
-                    )  # 1 if attribute a is underused once
+                    )
 
-    E2 = {}  # E2_aktr: Number of additional under uses beyond first underuse
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
+    E2 = {}
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                for r in R:
                     E2[k, a, t, r] = _add_var(
                         model,
                         lb=0.0,
                         ub=inf,
                         cost=w2[k, a, t],
                         integrality=highspy.HighsVarType.kInteger,
-                    )  # Number of additional underuses
+                    )
 
-    P = {}  # P_ijr: 1 if persons i and j are at same table in round r
-    for i in I:  # Loop through all people
-        for j in I:  # Loop through all people
-            if j > i:  # Only create for j > i to avoid duplicates
-                for r in R:  # Loop through all rounds
+    P = {}
+    for i in I:
+        for j in I:
+            if j > i:
+                for r in R:
                     P[i, j, r] = _add_var(
                         model,
                         lb=0.0,
                         ub=1.0,
                         integrality=highspy.HighsVarType.kInteger,
-                    )  # 1 if i and j meet in round r
+                    )
 
-    H = {}  # H_ij: 1 if persons i and j have ever been together across all rounds
-    for i in I:  # Loop through all people
-        for j in I:  # Loop through all people
-            if j > i:  # Only create for j > i to avoid duplicates
+    H = {}
+    for i in I:
+        for j in I:
+            if j > i:
                 H[i, j] = _add_var(
                     model,
                     lb=0.0,
                     ub=1.0,
                     cost=lam,
                     integrality=highspy.HighsVarType.kInteger,
-                )  # 1 if i and j have ever met
+                )
 
-    # CONSTRAINTS
-    # Constraint 1: Lower bound on table size if table is used
-    for t in T:  # Loop through all tables
-        for r in R:  # Loop through all rounds
+    for t in T:
+        for r in R:
             indices = [Y[i, t, r] for i in I] + [W[t, r]]
             values = [1.0 for _ in I] + [-float(l)]
-            _add_row(model, 0.0, inf, indices, values)  # Minimum l people if table used
+            _add_row(model, 0.0, inf, indices, values)
 
-    # Constraint 2: Upper bound on table size
-    for t in T:  # Loop through all tables
-        for r in R:  # Loop through all rounds
+    for t in T:
+        for r in R:
             indices = [Y[i, t, r] for i in I] + [W[t, r]]
             values = [1.0 for _ in I] + [-float(u)]
-            _add_row(model, -inf, 0.0, indices, values)  # Maximum u people per table
+            _add_row(model, -inf, 0.0, indices, values)
 
-    # Constraint 3: Each person assigned to exactly one table per round
-    for i in I:  # Loop through all people
-        for r in R:  # Loop through all rounds
+    for i in I:
+        for r in R:
             indices = [Y[i, t, r] for t in T]
             values = [1.0 for _ in T]
-            _add_row(model, 1.0, 1.0, indices, values)  # Each person at exactly one table
+            _add_row(model, 1.0, 1.0, indices, values)
 
-    # Constraint 4: Anchor first person for faster solving
-    if len(params["df"]) > 0:
-        _add_row(model, 1.0, 1.0, [Y[0, 0, 0]], [1.0])  # Person 0 at table 0 in round 0
+    for i, locked_table_idx in locked_indices.items():
+        for r in R:
+            _add_row(model, 1.0, 1.0, [Y[i, locked_table_idx, r]], [1.0])
 
-    # Constraint 5: Symmetry breaking for table usage
-    for t in range(len(T) - 1):  # Loop through all tables except last
-        for r in R:  # Loop through all rounds
+    if len(params["df"]) > 0 and 0 not in locked_indices:
+        _add_row(model, 1.0, 1.0, [Y[0, 0, 0]], [1.0])
+
+    for t in range(len(T) - 1):
+        for r in R:
             indices = [W[t, r], W[t + 1, r]]
             values = [1.0, -1.0]
-            _add_row(model, 0.0, inf, indices, values)  # Table t must be used before table t+1
+            _add_row(model, 0.0, inf, indices, values)
 
-    # Constraint 6: Tracks deviations from target attribute levels
-    for k in K:  # Loop through all characteristics
-        for a in Ak[k]:  # Loop through all attributes of characteristic k
-            for t in T:  # Loop through all tables
-                for r in R:  # Loop through all rounds
+    for k in K:
+        for a in Ak[k]:
+            for t in T:
+                for r in R:
                     indices = []
                     values = []
                     for i in I:
@@ -326,9 +425,8 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                             values.append(float(b[i, k, a]))
                     indices.extend([E1_bar[k, a, t, r], E2_bar[k, a, t, r], E1[k, a, t, r], E2[k, a, t, r]])
                     values.extend([-1.0, -1.0, 1.0, 1.0])
-                    _add_row(model, float(v[k, a, t]), float(v[k, a, t]), indices, values)  # Actual count +/- deviations = target
+                    _add_row(model, float(v[k, a, t]), float(v[k, a, t]), indices, values)
 
-    # Optional hard bounds from updated model spec; disabled unless provided.
     if v_bar is not None:
         for k in K:
             for a in Ak[k]:
@@ -340,7 +438,8 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                             if b[i, k, a] != 0:
                                 indices.append(Y[i, t, r])
                                 values.append(float(b[i, k, a]))
-                        _add_row(model, -inf, float(v_bar[k, a, t]), indices, values)
+                        if indices:
+                            _add_row(model, -inf, float(v_bar[k, a, t]), indices, values)
 
     if v_under is not None:
         for k in K:
@@ -353,26 +452,25 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                             if b[i, k, a] != 0:
                                 indices.append(Y[i, t, r])
                                 values.append(float(b[i, k, a]))
-                        _add_row(model, float(v_under[k, a, t]), inf, indices, values)
+                        if indices:
+                            _add_row(model, float(v_under[k, a, t]), inf, indices, values)
 
-    # Constraint 14: Pair meeting linearization
-    for i in I:  # Loop through all people
-        for j in I:  # Loop through all people
-            if j > i:  # Only for j > i to avoid duplicates
-                for t in T:  # Loop through all tables
-                    for r in R:  # Loop through all rounds
+    for i in I:
+        for j in I:
+            if j > i:
+                for t in T:
+                    for r in R:
                         indices = [P[i, j, r], Y[i, t, r], Y[j, t, r]]
                         values = [1.0, -1.0, -1.0]
-                        _add_row(model, -1.0, inf, indices, values)  # If both at table t, then P = 1
+                        _add_row(model, -1.0, inf, indices, values)
 
-    # Constraint 15: Ever-met indicator across rounds
-    for i in I:  # Loop through all people
-        for j in I:  # Loop through all people
-            if j > i:  # Only for j > i to avoid duplicates
-                for r in R:  # Loop through all rounds
+    for i in I:
+        for j in I:
+            if j > i:
+                for r in R:
                     indices = [H[i, j], P[i, j, r]]
                     values = [1.0, -1.0]
-                    _add_row(model, 0.0, inf, indices, values)  # If met in round r, then H = 1
+                    _add_row(model, 0.0, inf, indices, values)
 
     return model, Y, W
 
@@ -389,7 +487,16 @@ def solve_solver_v2(
     w2_bar_value: float | None = None,
     v_bar: dict | None = None,
     v_under: dict | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    characteristics: list[str] | None = None,
+    num_tables: int = 6,
+    num_rounds: int = 3,
+    min_people_per_table: int = 4,
+    max_people_per_table: int = 6,
+    trait_targets: dict | None = None,
+    trait_max_allowed: dict | None = None,
+    trait_min_required: dict | None = None,
+    locked_tables: dict | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, float, float | None]:
     params = _prepare_parameters(
         df,
         v_target=v_target,
@@ -400,14 +507,22 @@ def solve_solver_v2(
         w2_bar_value=w2_bar_value,
         v_bar=v_bar,
         v_under=v_under,
+        characteristics=characteristics,
+        num_tables=num_tables,
+        num_rounds=num_rounds,
+        min_people_per_table=min_people_per_table,
+        max_people_per_table=max_people_per_table,
+        trait_targets=trait_targets,
+        trait_max_allowed=trait_max_allowed,
+        trait_min_required=trait_min_required,
+        locked_tables=locked_tables,
     )
     model, Y, W = _build_model(params)
     model.setOptionValue("output_flag", bool(debug))
     if time_limit_seconds is not None:
         model.setOptionValue("time_limit", float(time_limit_seconds))
-    model.run()  # Solve the model
+    model.run()
 
-    # Extract solution (same pattern as SolverV2 notebook)
     status = model.getModelStatus()
     info = model.getInfo()
     if status != highspy.HighsModelStatus.kOptimal:
@@ -430,11 +545,11 @@ def solve_solver_v2(
 
     row_assignments = {}
     round_table_rows = []
-    for r in R:  # Loop through all rounds
-        for t in T:  # Loop through all tables
-            if col_value[W[t, r]] > 0.5:  # If table t is used in round r
-                people_in_t = [i for i in I if col_value[Y[i, t, r]] > 0.5]  # Get people assigned to table t in round r
-                people_in_t.sort()  # Sort IDs for cleaner output
+    for r in R:
+        for t in T:
+            if col_value[W[t, r]] > 0.5:
+                people_in_t = [i for i in I if col_value[Y[i, t, r]] > 0.5]
+                people_in_t.sort()
                 for i in people_in_t:
                     row_assignments[(i, r)] = t + 1
                     round_table_rows.append(
@@ -450,8 +565,15 @@ def solve_solver_v2(
         col = f"Round_{r + 1}_Table"
         work_df[col] = [row_assignments.get((i, r), None) for i in I]
 
-    schedule_df = pd.DataFrame(round_table_rows).sort_values(
-        ["Round", "Table", "Participant_ID"], kind="stable"
-    )
+    schedule_df = pd.DataFrame(round_table_rows)
+    if not schedule_df.empty:
+        schedule_df = schedule_df.sort_values(["Round", "Table", "Participant_ID"], kind="stable")
 
-    return work_df, schedule_df, float(info.objective_function_value)
+    objective = getattr(info, "objective_function_value", None)
+    if objective is None:
+        objective = 0.0
+
+    mip_gap = getattr(info, "mip_gap", None)
+    gap_value = None if mip_gap is None else float(mip_gap)
+
+    return work_df, schedule_df, float(objective), gap_value
