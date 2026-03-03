@@ -1,4 +1,4 @@
-import re
+﻿import re
 from pathlib import Path
 import inspect
 
@@ -512,7 +512,7 @@ elif step == 3:
             f"{event_setup['min_people_per_table']}-{event_setup['max_people_per_table']}."
         )
     else:
-        st.info("Group assignments typically take about 10-60 seconds to generate. In harder cases, it can take up to 2 minutes.")
+        st.info("Group assignments can take up to 2 minutes to generate.")
 
     left, right = st.columns(2)
     with left:
