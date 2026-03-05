@@ -11,8 +11,7 @@ from ui import inject_global_styles, render_hero, render_progress
 st.set_page_config(page_title="Group Formation Studio", page_icon="groups", layout="wide")
 inject_global_styles()
 
-TEMPLATE_PATH = Path(__file__).parent / "User_Input_Template_2.2.xlsx"
-
+TEMPLATE_PATH = Path(__file__).parent / "User_Input_Template_SAMPLE.xlsx"
 
 def _normalize_label(value) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
