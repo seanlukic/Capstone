@@ -11,8 +11,10 @@ from ui import inject_global_styles, render_hero, render_progress
 st.set_page_config(page_title="Group Formation Studio", page_icon="groups", layout="wide")
 inject_global_styles()
 
+# Path to the sample template included with the app that facilitators download and fill out. 
 TEMPLATE_PATH = Path(__file__).parent / "User_Input_Template_SAMPLE.xlsx"
 
+# Utility functions for parsing and normalizing the uploaded Excel template data.
 def _normalize_label(value) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
 
@@ -31,7 +33,7 @@ def _to_int(value, default: int) -> int:
     except Exception:
         return int(default)
 
-
+# Convert to float if possible, otherwise return None for missing/invalid values.
 def _to_float_or_none(value) -> float | None:
     if pd.isna(value):
         return None
@@ -43,7 +45,7 @@ def _to_float_or_none(value) -> float | None:
     except Exception:
         return None
 
-
+# Finds the sheet that best matches any of the provided candidate names, using normalization and partial matching.
 def _find_sheet_name(workbook: pd.ExcelFile, *candidate_names: str) -> str | None:
     normalized = {_normalize_label(name): name for name in workbook.sheet_names}
     for candidate in candidate_names:
@@ -55,7 +57,7 @@ def _find_sheet_name(workbook: pd.ExcelFile, *candidate_names: str) -> str | Non
             return original
     return None
 
-
+# Parses the event_setup sheet to extract configuration values, applying defaults and normalization as needed.
 def _parse_event_setup(workbook: pd.ExcelFile) -> dict:
     defaults = {
         "number_of_tables": 6,
@@ -88,7 +90,7 @@ def _parse_event_setup(workbook: pd.ExcelFile) -> dict:
         "number_of_rounds": max(1, rounds),
     }
 
-
+# Parses the traits sheet to extract characteristics and trait constraints. 
 def _parse_traits_sheet(workbook: pd.ExcelFile) -> dict:
     sheet = _find_sheet_name(workbook, "traits")
     if sheet is None:
@@ -163,7 +165,7 @@ def _parse_traits_sheet(workbook: pd.ExcelFile) -> dict:
         "trait_min_required": trait_min_required,
     }
 
-
+# Reads the participants sheet from the workbook as a DataDrame. 
 def _read_participants_sheet(workbook: pd.ExcelFile) -> pd.DataFrame:
     sheet = _find_sheet_name(workbook, "participants")
     if sheet is None:
@@ -173,7 +175,7 @@ def _read_participants_sheet(workbook: pd.ExcelFile) -> pd.DataFrame:
         )
     return pd.read_excel(workbook, sheet_name=sheet, header=1)
 
-
+# Parses the table_lock sheet to extract any participants locked to specific tables, returning a mapping of Participant_ID to locked table number.
 def _parse_locked_table_value(value) -> int | None:
     text = _clean_text(value)
     if not text:
@@ -186,8 +188,8 @@ def _parse_locked_table_value(value) -> int | None:
     return None
 
 
-def _parse_anchors_and_locks(workbook: pd.ExcelFile, table_count: int) -> dict[str, int]:
-    sheet = _find_sheet_name(workbook, "anchors_and_locks", "anchors and locks")
+def _parse_table_lock_sheet(workbook: pd.ExcelFile, table_count: int) -> dict[str, int]:
+    sheet = _find_sheet_name(workbook, "table_lock", "table locks")
     if sheet is None:
         return {}
 
@@ -218,7 +220,8 @@ def _parse_anchors_and_locks(workbook: pd.ExcelFile, table_count: int) -> dict[s
             locks[participant_id] = table_number
     return locks
 
-
+# Normalizes and transforms the raw participants DataFrame, extracting Participant_ID, Name, and characteristic-trait pairs 
+# into a clean format suitable for the solver. Also returns the list of characteristics and count of generated IDs.
 def _transform_participants(raw_df: pd.DataFrame, characteristics_from_traits: list[str]) -> tuple[pd.DataFrame, list[str], int]:
     df = raw_df.copy()
     df.columns = [str(col).strip() for col in df.columns]
@@ -320,7 +323,8 @@ def _transform_participants(raw_df: pd.DataFrame, characteristics_from_traits: l
 
     return out.reset_index(drop=True), characteristics, generated_ids
 
-
+# Parses the uploaded template file to extract event setup, traits configuration, 
+# participant data, and locks. Returns a structured dictionary of all parsed information.
 def _parse_template(uploaded_file) -> dict:
     workbook = pd.ExcelFile(uploaded_file)
     event_setup = _parse_event_setup(workbook)
@@ -330,7 +334,7 @@ def _parse_template(uploaded_file) -> dict:
         raw_participants,
         traits_config["characteristics"],
     )
-    locks = _parse_anchors_and_locks(workbook, event_setup["number_of_tables"])
+    locks = _parse_table_lock_sheet(workbook, event_setup["number_of_tables"])
 
     return {
         "raw_participants": raw_participants,
@@ -349,7 +353,7 @@ def go_to(step: int) -> None:
     st.session_state["step"] = step
     st.rerun()
 
-
+# Resets the app to return to home page. 
 def start_over() -> None:
     for key in list(st.session_state.keys()):
         if key not in {"theme"}:
@@ -357,7 +361,7 @@ def start_over() -> None:
     st.session_state["step"] = 1
     st.rerun()
 
-
+# Diversity score for each table. 
 def table_diversity_score(table_df: pd.DataFrame, diversity_cols: list[str]) -> int:
     score = 0
     for col in diversity_cols:
@@ -367,7 +371,7 @@ def table_diversity_score(table_df: pd.DataFrame, diversity_cols: list[str]) -> 
             score += values.nunique(dropna=True)
     return int(score)
 
-
+# Loads the solver and sets the solver to only run for 2 minutes at a maximum. 
 def _run_solver_with_compatibility(
     participants_df: pd.DataFrame,
     characteristics: list[str],
@@ -412,6 +416,7 @@ render_progress(step, total_steps=4)
 if step > 1 and st.button("Start Over"):
     start_over()
 
+# Step 1: Home page with app title, description, and button to start setup.
 if step == 1:
     st.title("Group Formation Studio")
     st.caption("Build diverse teams from spreadsheet uploads")
@@ -422,6 +427,7 @@ if step == 1:
     if st.button("Start Setup", type="primary"):
         go_to(2)
 
+# Step 2: Event setup page where users input event name and review settings. Then proceed to participant setup.
 elif step == 2:
     st.title("Event Setup")
     render_hero(
@@ -439,6 +445,8 @@ elif step == 2:
         st.session_state["event_name"] = event_name
         go_to(3)
 
+# Template upload and participant setup page. Users download the template, fill it out, and upload it. 
+# The app parses the uploaded file, extracts participant data and event configuration, and then allows users to generate group assignments.
 elif step == 3:
     st.title("Participant Setup")
     render_hero(
@@ -538,6 +546,7 @@ elif step == 3:
             st.session_state["optimality_gap"] = optimality_gap
             go_to(4)
 
+# Step 4: Results page showing the generated group assignments, diversity scores, and allowing users to download the results as CSV.
 else:
     st.title("Run and Results")
     render_hero(

@@ -1,8 +1,10 @@
-import highspy
-import numpy as np
+import highspy # Imports HiGHS 
+import numpy as np 
 import pandas as pd
 
-
+# Helper functions for data extraction, cleaning, and model preparation. 
+# These functions handle the transformation of raw input data into the structured format required by the optimization model, 
+# as well as building the model itself using the HiGHS library.
 def _extract_attribute_values(df: pd.DataFrame, column: str) -> list[str]:
     if column not in df.columns:
         return []
@@ -252,14 +254,14 @@ def _add_var(
         model.changeColIntegrality(idx, integrality)
     return idx
 
-
+# Helper function to add a constraint row to the model. This function takes the model, the lower and upper bounds of the constraint,
 def _add_row(model: highspy.Highs, lower: float, upper: float, indices: list[int], values: list[float]) -> None:
     num_nz = len(indices)
     idx = np.array(indices, dtype=np.int32)
     val = np.array(values, dtype=np.float64)
     model.addRow(lower, upper, num_nz, idx, val)
 
-
+# Builds the optimization model using the HiGHS library. This function takes the prepared parameters and constructs the decision variables, objective function, and constraints according to the problem formulation.
 def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     K = params["K"]
     Ak = params["Ak"]
@@ -285,6 +287,7 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
 
     inf = highspy.kHighsInf
 
+# Decision variables:
     Y = {}
     for i in I:
         for t in T:
