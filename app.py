@@ -451,7 +451,24 @@ elif step == 3:
     st.title("Participant Setup")
     render_hero(
         "Import participant data",
-        "Upload your completed template. The app reads event setup, traits, participants, and optional locks.",
+        "Upload your completed file. The app reads event setup, traits, participants, and optional locks.",
+    )
+    st.markdown(
+        """
+        <style>
+            div[data-testid="stDownloadButton"] > button {
+                background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+                border: none !important;
+                color: #ffffff !important;
+                border-radius: 10px;
+            }
+            div[data-testid="stDownloadButton"] > button:hover {
+                background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+                color: #ffffff !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
     if TEMPLATE_PATH.exists():
