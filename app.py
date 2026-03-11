@@ -371,7 +371,7 @@ def table_diversity_score(table_df: pd.DataFrame, diversity_cols: list[str]) -> 
             score += values.nunique(dropna=True)
     return int(score)
 
-# Loads the solver and sets the solver to only run for 2 minutes at a maximum. 
+# Loads the solver and sets the solver to only run for 3 minutes at a maximum. 
 def _run_solver_with_compatibility(
     participants_df: pd.DataFrame,
     characteristics: list[str],
@@ -386,7 +386,7 @@ def _run_solver_with_compatibility(
         return solve_solver_v2(
             participants_df,
             debug=True,
-            time_limit_seconds=600.0,
+            time_limit_seconds=180.0,
             characteristics=characteristics,
             num_tables=event_setup["number_of_tables"],
             num_rounds=event_setup["number_of_rounds"],
@@ -402,7 +402,7 @@ def _run_solver_with_compatibility(
     participant_results, schedule_results, objective_value = solve_solver_v2(
         participants_df,
         debug=True,
-        time_limit_seconds=120.0,
+        time_limit_seconds=180.0,
     )
     return participant_results, schedule_results, objective_value, None
 
@@ -536,7 +536,7 @@ elif step == 3:
             f"{event_setup['min_people_per_table']}-{event_setup['max_people_per_table']}."
         )
     else:
-        st.info("Group assignments can take up to 2 minutes to generate.")
+        st.info("Group assignments can take up to 3 minutes to generate.")
 
     left, right = st.columns(2)
     with left:
