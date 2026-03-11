@@ -526,7 +526,7 @@ elif step == 3:
     st.caption(f"Traits in model: {len(characteristics)}. Locked participants: {len(locks)}")
 
     st.subheader("Current Participant Data")
-    st.dataframe(st.session_state["uploaded_df"], use_container_width=True)
+    st.dataframe(st.session_state["uploaded_df"], use_container_width=True, hide_index=True)
 
     invalid_count = len(participants_df) < min_total or len(participants_df) > max_total
     if invalid_count:
