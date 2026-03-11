@@ -386,7 +386,7 @@ def _run_solver_with_compatibility(
         return solve_solver_v2(
             participants_df,
             debug=True,
-            time_limit_seconds=180.0,
+            time_limit_seconds=1200.0,
             characteristics=characteristics,
             num_tables=event_setup["number_of_tables"],
             num_rounds=event_setup["number_of_rounds"],
@@ -402,7 +402,7 @@ def _run_solver_with_compatibility(
     participant_results, schedule_results, objective_value = solve_solver_v2(
         participants_df,
         debug=True,
-        time_limit_seconds=180.0,
+        time_limit_seconds=1200.0,
     )
     return participant_results, schedule_results, objective_value, None
 

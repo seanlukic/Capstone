@@ -112,9 +112,9 @@ def _prepare_parameters(
         if characteristic in Ak and trait not in Ak[characteristic]:
             Ak[characteristic].append(trait)
 
-    I = range(len(work_df))
-    T = range(max(1, int(num_tables)))
-    R = range(max(1, int(num_rounds)))
+    I = range(len(work_df)) # Number of participant indices
+    T = range(max(1, int(num_tables))) # Number of tables
+    R = range(max(1, int(num_rounds))) # Number of rounds
 
     l = max(1, int(min_people_per_table))
     u = max(1, int(max_people_per_table))
