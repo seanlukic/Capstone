@@ -151,11 +151,12 @@ def render(go_to) -> None:
     st.markdown(
         """
         <p class="landing-kicker">Group Formation Studio</p>
-        <h1 class="landing-title">Build balanced groups<br>with fewer manual tradeoffs.</h1>
+        <h1 class="landing-title">Multi-Step Optimization Model for Group Formation</h1>
         <p class="landing-subtitle">
-            Configure your event, upload one template, and let the optimizer produce
-            table assignments with diversity constraints, trait targets, and optional
-            participant locks that you set.
+            Build balanced groups with fewer manual tradeoffs. Configure your event,
+            upload one template, and let the optimizer produce table assignments with
+            diversity constraints, trait targets, and optional participant locks that
+            you set.
         </p>
         <hr class="landing-divider">
         <div class="landing-metrics">
