@@ -18,7 +18,7 @@ def render(go_to) -> None:
                 </div>
                 <div class="landing-metric">
                     <p class="landing-metric-label">Result output</p>
-                    <p class="landing-metric-value">Participant + schedule CSVs</p>
+                    <p class="landing-metric-value">Group assignments and CSV exports</p>
                 </div>
             </div>
         </section>
