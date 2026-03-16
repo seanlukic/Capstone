@@ -77,11 +77,16 @@ def render(go_to) -> None:
 
     round_count = int(event_setup.get("number_of_rounds", 3))
     participant_label_col = "Name" if "Name" in participant_results.columns else "Participant_ID"
-    schedule_cols = [participant_label_col, *[f"Round_{r}_Table" for r in range(1, round_count + 1)]]
+    round_table_cols = [f"Round_{r}_Table" for r in range(1, round_count + 1)]
+    schedule_cols = [participant_label_col, *round_table_cols]
     available_schedule_cols = [col for col in schedule_cols if col in participant_results.columns]
 
-    if "Person_Index" in participant_results.columns:
-        display_schedule = participant_results.sort_values("Person_Index")[available_schedule_cols].reset_index(drop=True)
+    sort_cols = [col for col in round_table_cols if col in participant_results.columns]
+    if participant_label_col in participant_results.columns:
+        sort_cols.append(participant_label_col)
+
+    if sort_cols:
+        display_schedule = participant_results.sort_values(sort_cols)[available_schedule_cols].reset_index(drop=True)
     else:
         display_schedule = participant_results[available_schedule_cols].reset_index(drop=True)
 
