@@ -15,6 +15,23 @@ def render(go_to) -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.markdown(
+        """
+        <style>
+            div[data-testid="stDownloadButton"] > button {
+                background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+                border: none !important;
+                color: #ffffff !important;
+                border-radius: 10px;
+            }
+            div[data-testid="stDownloadButton"] > button:hover {
+                background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+                color: #ffffff !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     participant_results = st.session_state.get("participant_results")
     schedule_results = st.session_state.get("schedule_results")
@@ -54,21 +71,22 @@ def render(go_to) -> None:
                     st.markdown(f"**Table {table_number}**")
                     st.caption(f"Diversity score: {score}")
                     for _, person_row in table_df.iterrows():
-                        person_id = _clean_text(person_row.get("Participant_ID", ""))
                         person_name = _clean_text(person_row.get("Name", ""))
                         if person_name:
-                            st.write(f"- {person_name} ({person_id})")
-                        else:
-                            st.write(f"- Participant_ID: {person_id}")
+                            st.write(f"- {person_name}")
 
     round_count = int(event_setup.get("number_of_rounds", 3))
-    schedule_cols = ["Participant_ID", *[f"Round_{r}_Table" for r in range(1, round_count + 1)]]
+    participant_label_col = "Name" if "Name" in participant_results.columns else "Participant_ID"
+    schedule_cols = [participant_label_col, *[f"Round_{r}_Table" for r in range(1, round_count + 1)]]
     available_schedule_cols = [col for col in schedule_cols if col in participant_results.columns]
 
     if "Person_Index" in participant_results.columns:
         display_schedule = participant_results.sort_values("Person_Index")[available_schedule_cols].reset_index(drop=True)
     else:
         display_schedule = participant_results[available_schedule_cols].reset_index(drop=True)
+
+    if participant_label_col == "Name":
+        display_schedule = display_schedule.rename(columns={"Name": "Participant_Name"})
 
     csv_data = display_schedule.to_csv(index=False).encode("utf-8")
     st.download_button(

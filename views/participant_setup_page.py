@@ -115,7 +115,7 @@ def render(go_to) -> None:
                     participant_results, schedule_results, objective_value, optimality_gap = solve_solver_v2(
                         participants_df,
                         debug=True,
-                        time_limit_seconds=20.0,
+                        time_limit_seconds=7200.0,
                         characteristics=characteristics,
                         num_tables=event_setup["number_of_tables"],
                         num_rounds=event_setup["number_of_rounds"],
