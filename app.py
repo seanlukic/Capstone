@@ -299,8 +299,14 @@ def _render_step(step: int, render_fn) -> None:
     st.session_state["step"] = step
     render_progress(step, total_steps=4)
 
-    if step > 1 and st.button("Start Over", type="primary"):
-        start_over()
+    if step > 1: 
+        col_back, col_over, _ = st.columns([1.2, 1.5, 7.3])
+        with col_back:
+            if st.button("← Back", type="primary", key=f"back_{step}"):
+                go_to(step - 1)
+        with col_over:
+            if st.button("Start Over", type="primary", key=f"start_over_{step}"):
+                start_over()
 
     render_fn(go_to)
 
