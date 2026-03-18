@@ -102,7 +102,7 @@ def render(go_to) -> None:
             f"{event_setup['min_people_per_table']}-{event_setup['max_people_per_table']}."
         )
     else:
-        st.info("Group assignments can take up to 2 hours to generate.")
+        st.info("Group assignments can take up to 3 minutes to generate.")
 
     left, right = st.columns(2)
     with left:

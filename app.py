@@ -203,7 +203,16 @@ def inject_global_styles() -> None:
         }
 
         .stDownloadButton > button {
-            border-radius: 10px !important;
+            background: #52b788 !important;
+            color: #0d1b12 !important;
+            border: none !important;
+            border-radius: 999px !important;
+            font-weight: 700 !important;
+        }
+
+        .stDownloadButton > button:hover {
+            background: #40a070 !important;
+            color: #0d1b12 !important;
         }
 
         .stTextInput input,
