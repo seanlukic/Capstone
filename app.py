@@ -174,13 +174,32 @@ def inject_global_styles() -> None:
             margin-bottom: 0;
         }
 
-        .stButton > button {
-            background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
-            color: #ffffff !important;
-            border: none !important;
-            border-radius: 10px;
+        div[data-testid="stButton"] > button {
+            border-radius: 999px;
             padding: 0.55rem 1.05rem;
             font-weight: 600;
+        }
+
+        div[data-testid="stButton"] > button[kind="primary"] {
+            background: #52b788 !important;
+            color: #0d1b12 !important;
+            border: none !important;
+        }
+
+        div[data-testid="stButton"] > button[kind="primary"]:hover {
+            background: #40a070 !important;
+            border: none !important;
+        }
+
+        div[data-testid="stButton"] > button[kind="secondary"] {
+            background: transparent;
+            color: var(--text) !important;
+            border: 1px solid var(--border) !important;
+        }
+
+        div[data-testid="stButton"] > button[kind="secondary"]:hover {
+            border-color: #52b788 !important;
+            color: #52b788 !important;
         }
 
         .stDownloadButton > button {
@@ -280,7 +299,7 @@ def _render_step(step: int, render_fn) -> None:
     st.session_state["step"] = step
     render_progress(step, total_steps=4)
 
-    if step > 1 and st.button("Start Over"):
+    if step > 1 and st.button("Start Over", type="primary"):
         start_over()
 
     render_fn(go_to)
