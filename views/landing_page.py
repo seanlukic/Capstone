@@ -87,20 +87,6 @@ _CSS = """
     box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: light) {
-    .landing-feature {
-        background: #ffffff;
-        border: 1px solid #e8e8e8;
-    }
-    .landing-kicker,
-    .landing-feature-num {
-        color: #0F6E56;
-    }
-    .landing-divider {
-        border-top-color: #e0e0e0;
-    }
-}
-
 .landing-feature-num {
     font-size: 0.68rem;
     font-weight: 600;
