@@ -1,11 +1,6 @@
-import sys
-from pathlib import Path
-
 import highspy # Imports HiGHS 
 import numpy as np 
 import pandas as pd
-
-from template_parser import _parse_template
 
 # Helper functions for data extraction, cleaning, and model preparation. 
 # These functions handle the transformation of raw input data into the structured format required by the optimization model, 
@@ -222,50 +217,6 @@ def _prepare_parameters(
                 continue
             locked_indices[id_to_index[pid]] = table_number - 1
 
-    # Build a mapping from Participant_ID to row index for separation pair processing
-    id_to_index = {
-        _clean_text(work_df.at[i, "Participant_ID"]): i
-        for i in I
-    }
-
-    # Process separation pairs (set S) into a set of index tuples (i, j) with i < j
-    separation_idx_set: set[tuple[int, int]] | None = None
-    # Note: separation_pairs is accepted by callers (see solve_solver_v2)
-    # but may be None. Accept pairs as (id,id) or numeric indices (0- or 1-based).
-    try:
-        # separation_pairs may be passed via function kw in newer versions
-        separation_pairs  # type: ignore
-    except Exception:
-        separation_pairs = None  # type: ignore
-
-    if separation_pairs:
-        separation_idx_set = set()
-        for pair in separation_pairs:
-            if not pair or len(pair) < 2:
-                continue
-            a_raw, b_raw = pair[0], pair[1]
-            # Try numeric indices first (accept 0-based or 1-based)
-            try:
-                ai = int(a_raw)
-                bi = int(b_raw)
-                if ai in I and bi in I:
-                    i1, i2 = sorted((ai, bi))
-                    separation_idx_set.add((i1, i2))
-                    continue
-                if (ai - 1) in I and (bi - 1) in I:
-                    i1, i2 = sorted((ai - 1, bi - 1))
-                    separation_idx_set.add((i1, i2))
-                    continue
-            except Exception:
-                pass
-
-            # Otherwise treat as Participant_ID strings
-            pid_a = _clean_text(str(a_raw))
-            pid_b = _clean_text(str(b_raw))
-            if pid_a in id_to_index and pid_b in id_to_index:
-                i1, i2 = sorted((id_to_index[pid_a], id_to_index[pid_b]))
-                separation_idx_set.add((i1, i2))
-
     return {
         "df": work_df,
         "K": K,
@@ -285,7 +236,6 @@ def _prepare_parameters(
         "w1": w1,
         "w2": w2,
         "locked_indices": locked_indices,
-        "separation_pairs_idx": separation_idx_set,
     }
 
 
@@ -528,61 +478,6 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     return model, Y, W
 
 
-def _print_characteristics(params: dict) -> None:
-    print("\n=== Characteristics Found ===")
-    ak = params.get("Ak")
-    if not ak:
-        print("Ak not found in prepared parameters")
-        return
-
-    for characteristic, values in ak.items():
-        print(f"{characteristic}: {len(values)} unique values")
-        print(f"  {values}\n")
-
-
-def _print_solution_summary(
-    status,
-    objective: float,
-    col_value: list[float],
-    params: dict,
-    Y: dict,
-    W: dict,
-) -> None:
-    print(f"\nSolver status: {status}")
-
-    is_feasible = (
-        status == highspy.HighsModelStatus.kOptimal
-        or status == highspy.HighsModelStatus.kTimeLimit
-    )
-    if not is_feasible:
-        print(f"Optimization failed with status: {status}")
-        return
-
-    if status == highspy.HighsModelStatus.kOptimal:
-        print(f"Optimal Solution Found - Total Penalty: {objective:.1f}\n")
-    else:
-        print(f"Feasible solution found before time limit - Total Penalty: {objective:.1f}\n")
-
-    I = params["I"]
-    T = params["T"]
-    R = params["R"]
-    work_df = params["df"]
-
-    for r in R:
-        print(f"Round {r + 1}:")
-        for t in T:
-            if col_value[W[t, r]] > 0.5:
-                students_in_table = sorted(i for i in I if col_value[Y[i, t, r]] > 0.5)
-                student_names = [
-                    _clean_text(work_df.at[i, "Name"]) or _clean_text(work_df.at[i, "Participant_ID"])
-                    for i in students_in_table
-                ]
-                print(
-                    f"  Group {t + 1}: {len(students_in_table)} students "
-                    f"(Names: {student_names})"
-                )
-
-
 def solve_solver_v2(
     df: pd.DataFrame,
     debug: bool = False,
@@ -625,9 +520,6 @@ def solve_solver_v2(
         trait_min_required=trait_min_required,
         locked_tables=locked_tables,
     )
-    if debug:
-        _print_characteristics(params)
-
     model, Y, W = _build_model(params)
     model.setOptionValue("output_flag", bool(debug))
     if time_limit_seconds is not None:
@@ -684,45 +576,7 @@ def solve_solver_v2(
     if objective is None:
         objective = 0.0
 
-    if debug:
-        _print_solution_summary(status, float(objective), col_value, params, Y, W)
-
     mip_gap = getattr(info, "mip_gap", None)
     gap_value = None if mip_gap is None else float(mip_gap)
 
     return work_df, schedule_df, float(objective), gap_value
-
-
-if __name__ == "__main__":
-    default_input_path = Path(r"C:\Users\seanl\Spring_2026\Capstone 2\User_Input_Template_SAMPLE.xlsx")
-    fallback_input_path = Path("User_Input_Template_SAMPLE.xlsx")
-    input_path = Path(sys.argv[1]) if len(sys.argv) > 1 else default_input_path
-    if not input_path.exists():
-        input_path = fallback_input_path
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input workbook not found: {input_path}")
-
-    print(f"Reading input workbook: {input_path}")
-    parsed = _parse_template(input_path)
-    input_df = parsed["participants_df"]
-    event_setup = parsed["event_setup"]
-    solved_df, schedule_df, objective_value, mip_gap = solve_solver_v2(
-        input_df,
-        debug=True,
-        characteristics=parsed["characteristics"],
-        num_tables=event_setup["number_of_tables"],
-        num_rounds=event_setup["number_of_rounds"],
-        min_people_per_table=event_setup["min_people_per_table"],
-        max_people_per_table=event_setup["max_people_per_table"],
-        trait_targets=parsed["trait_targets"],
-        trait_max_allowed=parsed["trait_max_allowed"],
-        trait_min_required=parsed["trait_min_required"],
-        locked_tables=parsed["locks"],
-    )
-
-    print("\n=== Solve Complete ===")
-    print(f"Objective: {objective_value:.1f}")
-    print(f"MIP gap: {mip_gap}")
-    print(f"Participants: {len(input_df)}")
-    print(f"Characteristics: {parsed['characteristics']}")
-    print(f"Assigned rows: {len(schedule_df)}")
