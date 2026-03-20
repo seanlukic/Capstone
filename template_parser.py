@@ -360,4 +360,3 @@ def table_diversity_score(table_df: pd.DataFrame, diversity_cols: list[str]) -> 
             values = values[values.ne("")]
             score += values.nunique(dropna=True)
     return int(score)
-
