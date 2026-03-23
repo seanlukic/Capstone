@@ -18,7 +18,50 @@ def _get_output_template_path() -> Path | None:
     return None
 
 
-def _build_output_workbook(display_schedule):
+def _total_balance_interpretation(total_balance_score: float) -> str:
+    if total_balance_score >= 95:
+        return "Very evenly distributed"
+    if total_balance_score >= 80:
+        return "Small differences between tables"
+    if total_balance_score >= 60:
+        return "Noticeable imbalance"
+    return "Uneven distribution across tables"
+
+
+def _calculate_total_balance_score(schedule_results, participant_results, diversity_cols: list[str]) -> float:
+    all_rounds = sorted(schedule_results["Round"].unique().tolist())
+    round_average_scores = []
+    characteristic_count = max(1, len(diversity_cols))
+
+    for round_number in all_rounds:
+        round_df = schedule_results[schedule_results["Round"] == round_number]
+        table_numbers = sorted(round_df["Table"].unique().tolist())
+        table_scores = []
+        for table_number in table_numbers:
+            table_rows = round_df[round_df["Table"] == table_number]
+            person_indices = table_rows["Person_Index"].astype(int).tolist()
+            table_df = participant_results.iloc[person_indices]
+            raw_score = float(table_diversity_score(table_df, diversity_cols))
+            table_scores.append(raw_score / characteristic_count)
+
+        if table_scores:
+            round_average_scores.append(sum(table_scores) / len(table_scores))
+
+    if not round_average_scores:
+        return 0.0
+
+    if len(round_average_scores) == 1:
+        std_dev = 0.0
+    else:
+        mean_score = sum(round_average_scores) / len(round_average_scores)
+        variance = sum((score - mean_score) ** 2 for score in round_average_scores) / len(round_average_scores)
+        std_dev = variance ** 0.5
+
+    total_balance_score = (1.0 - (std_dev / 0.5)) * 100.0
+    return max(0.0, min(100.0, total_balance_score))
+
+
+def _build_output_workbook(display_schedule, total_balance_score: float):
     template_path = _get_output_template_path()
     if template_path is None:
         raise FileNotFoundError(
@@ -55,6 +98,13 @@ def _build_output_workbook(display_schedule):
     for row_offset, (_, row) in enumerate(display_schedule.iterrows(), start=1):
         for column in expected_columns:
             worksheet.cell(row=header_row + row_offset, column=header_columns[column]).value = row[column]
+
+    if "Total Balance Score" not in workbook.sheetnames:
+        raise ValueError("Output template is missing the 'Total Balance Score' sheet.")
+
+    score_sheet = workbook["Total Balance Score"]
+    score_sheet["B7"] = f"{float(total_balance_score):.1f}%"
+    score_sheet["B8"] = _total_balance_interpretation(float(total_balance_score))
 
     output = BytesIO()
     workbook.save(output)
@@ -103,9 +153,11 @@ def render(go_to) -> None:
         st.error("No grouping results found. Go back and click Generate Groupings.")
         st.stop()
 
+    total_balance_score = _calculate_total_balance_score(schedule_results, participant_results, diversity_cols)
+
     metrics_col1, metrics_col2 = st.columns(2)
     with metrics_col1:
-        st.metric("Diversity Score", f"{objective_value:.1f}")
+        st.metric("Total Balance Score", f"{total_balance_score:.1f}%")
     with metrics_col2:
         if optimality_gap is None:
             st.metric("Optimality Gap", "N/A")
@@ -153,7 +205,7 @@ def render(go_to) -> None:
         display_schedule = display_schedule.rename(columns={"Name": "Participant_Name"})
 
     try:
-        workbook_bytes, workbook_name = _build_output_workbook(display_schedule)
+        workbook_bytes, workbook_name = _build_output_workbook(display_schedule, total_balance_score)
     except Exception as exc:
         st.error(f"Could not build Excel output: {exc}")
         workbook_bytes = None
