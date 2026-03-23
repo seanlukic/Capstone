@@ -1,9 +1,7 @@
 from io import BytesIO
 from pathlib import Path
-
 import streamlit as st
 from openpyxl import load_workbook
-
 from template_parser import _clean_text, table_diversity_score
 
 
