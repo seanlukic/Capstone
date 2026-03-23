@@ -1,6 +1,67 @@
+from io import BytesIO
+from pathlib import Path
+
 import streamlit as st
+from openpyxl import load_workbook
 
 from template_parser import _clean_text, table_diversity_score
+
+
+OUTPUT_TEMPLATE_CANDIDATES = [
+    Path(__file__).resolve().parent.parent / "Model_Output_Template.xlsx",
+    Path.home() / "Downloads" / "Model_Output_Template.xlsx",
+]
+
+
+def _get_output_template_path() -> Path | None:
+    for path in OUTPUT_TEMPLATE_CANDIDATES:
+        if path.exists():
+            return path
+    return None
+
+
+def _build_output_workbook(display_schedule):
+    template_path = _get_output_template_path()
+    if template_path is None:
+        raise FileNotFoundError(
+            "Could not find Model_Output_Template.xlsx in the project folder or Downloads."
+        )
+
+    workbook = load_workbook(template_path)
+    if "Current Assignments" not in workbook.sheetnames:
+        raise ValueError("Output template is missing the 'Current Assignments' sheet.")
+
+    worksheet = workbook["Current Assignments"]
+    expected_columns = display_schedule.columns.tolist()
+    header_row = None
+    header_columns = {}
+
+    for row_idx in range(1, worksheet.max_row + 1):
+        row_values = [worksheet.cell(row=row_idx, column=col_idx).value for col_idx in range(1, worksheet.max_column + 1)]
+        row_headers = {_clean_text(value): col_idx for col_idx, value in enumerate(row_values, start=1) if _clean_text(value)}
+        if expected_columns and all(column in row_headers for column in expected_columns):
+            header_row = row_idx
+            header_columns = row_headers
+            break
+
+    if header_row is None:
+        raise ValueError(
+            "Could not find the assignment header row in 'Current Assignments'."
+        )
+
+    max_clear_row = max(worksheet.max_row, header_row + len(display_schedule) + 50)
+    for row_idx in range(header_row + 1, max_clear_row + 1):
+        for column in expected_columns:
+            worksheet.cell(row=row_idx, column=header_columns[column]).value = None
+
+    for row_offset, (_, row) in enumerate(display_schedule.iterrows(), start=1):
+        for column in expected_columns:
+            worksheet.cell(row=header_row + row_offset, column=header_columns[column]).value = row[column]
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return output.getvalue(), template_path.name
 
 
 # Step 4: Results page showing the generated group assignments, diversity scores, and allowing users to download the results as CSV.
@@ -93,13 +154,20 @@ def render(go_to) -> None:
     if participant_label_col == "Name":
         display_schedule = display_schedule.rename(columns={"Name": "Participant_Name"})
 
-    csv_data = display_schedule.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download Group Assignments (CSV)",
-        data=csv_data,
-        file_name="group_assignments.csv",
-        mime="text/csv",
-    )
+    try:
+        workbook_bytes, workbook_name = _build_output_workbook(display_schedule)
+    except Exception as exc:
+        st.error(f"Could not build Excel output: {exc}")
+        workbook_bytes = None
+        workbook_name = None
+
+    if workbook_bytes is not None:
+        st.download_button(
+            "Download Group Assignments (Excel)",
+            data=workbook_bytes,
+            file_name=workbook_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     left, right = st.columns(2)
     with left:
