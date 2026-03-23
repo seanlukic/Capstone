@@ -28,10 +28,26 @@ def _total_balance_interpretation(total_balance_score: float) -> str:
     return "Uneven distribution across tables"
 
 
+def _table_balance_interpretation(table_balance_score: float) -> str:
+    if table_balance_score >= 100:
+        return "All traits match targets"
+    if table_balance_score >= 85:
+        return "Most traits are correct"
+    if table_balance_score >= 70:
+        return "A few traits are off"
+    return "Several traits need adjustment"
+
+
+def _normalized_table_diversity_score(table_df, diversity_cols: list[str]) -> float:
+    characteristic_count = max(1, len(diversity_cols))
+    participant_count = max(1, len(table_df))
+    raw_score = float(table_diversity_score(table_df, diversity_cols))
+    return raw_score / characteristic_count / participant_count
+
+
 def _calculate_total_balance_score(schedule_results, participant_results, diversity_cols: list[str]) -> float:
     all_rounds = sorted(schedule_results["Round"].unique().tolist())
     round_average_scores = []
-    characteristic_count = max(1, len(diversity_cols))
 
     for round_number in all_rounds:
         round_df = schedule_results[schedule_results["Round"] == round_number]
@@ -41,8 +57,7 @@ def _calculate_total_balance_score(schedule_results, participant_results, divers
             table_rows = round_df[round_df["Table"] == table_number]
             person_indices = table_rows["Person_Index"].astype(int).tolist()
             table_df = participant_results.iloc[person_indices]
-            raw_score = float(table_diversity_score(table_df, diversity_cols))
-            table_scores.append(raw_score / characteristic_count)
+            table_scores.append(_normalized_table_diversity_score(table_df, diversity_cols))
 
         if table_scores:
             round_average_scores.append(sum(table_scores) / len(table_scores))
@@ -61,7 +76,31 @@ def _calculate_total_balance_score(schedule_results, participant_results, divers
     return max(0.0, min(100.0, total_balance_score))
 
 
-def _build_output_workbook(display_schedule, total_balance_score: float):
+def _calculate_table_balance_scores(schedule_results, participant_results, diversity_cols: list[str]) -> list[tuple[int, float]]:
+    score_by_table: dict[int, list[float]] = {}
+    all_rounds = sorted(schedule_results["Round"].unique().tolist())
+
+    for round_number in all_rounds:
+        round_df = schedule_results[schedule_results["Round"] == round_number]
+        table_numbers = sorted(round_df["Table"].unique().tolist())
+        for table_number in table_numbers:
+            table_rows = round_df[round_df["Table"] == table_number]
+            person_indices = table_rows["Person_Index"].astype(int).tolist()
+            table_df = participant_results.iloc[person_indices]
+            score_by_table.setdefault(int(table_number), []).append(
+                _normalized_table_diversity_score(table_df, diversity_cols) * 100.0
+            )
+
+    output_rows = []
+    for table_number in sorted(score_by_table):
+        scores = score_by_table[table_number]
+        average_score = sum(scores) / len(scores) if scores else 0.0
+        output_rows.append((table_number, max(0.0, min(100.0, average_score))))
+
+    return output_rows
+
+
+def _build_output_workbook(display_schedule, total_balance_score: float, table_balance_scores: list[tuple[int, float]]):
     template_path = _get_output_template_path()
     if template_path is None:
         raise FileNotFoundError(
@@ -105,6 +144,34 @@ def _build_output_workbook(display_schedule, total_balance_score: float):
     score_sheet = workbook["Total Balance Score"]
     score_sheet["B7"] = f"{float(total_balance_score):.1f}%"
     score_sheet["B8"] = _total_balance_interpretation(float(total_balance_score))
+
+    if "Table Balance Score" not in workbook.sheetnames:
+        raise ValueError("Output template is missing the 'Table Balance Score' sheet.")
+
+    table_sheet = workbook["Table Balance Score"]
+    header_row = None
+    for row_idx in range(1, table_sheet.max_row + 1):
+        cell_a = _clean_text(table_sheet.cell(row=row_idx, column=1).value)
+        cell_b = _clean_text(table_sheet.cell(row=row_idx, column=2).value)
+        cell_c = _clean_text(table_sheet.cell(row=row_idx, column=3).value)
+        if cell_a == "Table" and cell_b and cell_c == "Interpretation":
+            header_row = row_idx
+            break
+
+    if header_row is None:
+        raise ValueError("Could not find the per-table output header row in 'Table Balance Score'.")
+
+    max_clear_row = max(table_sheet.max_row, header_row + len(table_balance_scores) + 50)
+    for row_idx in range(header_row + 1, max_clear_row + 1):
+        table_sheet.cell(row=row_idx, column=1).value = None
+        table_sheet.cell(row=row_idx, column=2).value = None
+        table_sheet.cell(row=row_idx, column=3).value = None
+
+    for row_offset, (table_number, average_score) in enumerate(table_balance_scores, start=1):
+        row_idx = header_row + row_offset
+        table_sheet.cell(row=row_idx, column=1).value = f"Table {table_number}"
+        table_sheet.cell(row=row_idx, column=2).value = f"{average_score:.1f}%"
+        table_sheet.cell(row=row_idx, column=3).value = _table_balance_interpretation(average_score)
 
     output = BytesIO()
     workbook.save(output)
@@ -154,6 +221,7 @@ def render(go_to) -> None:
         st.stop()
 
     total_balance_score = _calculate_total_balance_score(schedule_results, participant_results, diversity_cols)
+    table_balance_scores = _calculate_table_balance_scores(schedule_results, participant_results, diversity_cols)
 
     metrics_col1, metrics_col2 = st.columns(2)
     with metrics_col1:
@@ -163,6 +231,43 @@ def render(go_to) -> None:
             st.metric("Optimality Gap", "N/A")
         else:
             st.metric("Optimality Gap", f"{optimality_gap:.2%}")
+
+    round_count = int(event_setup.get("number_of_rounds", 3))
+    participant_label_col = "Name" if "Name" in participant_results.columns else "Participant_ID"
+    round_table_cols = [f"Round_{r}_Table" for r in range(1, round_count + 1)]
+    schedule_cols = [participant_label_col, *round_table_cols]
+    available_schedule_cols = [col for col in schedule_cols if col in participant_results.columns]
+
+    sort_cols = [col for col in round_table_cols if col in participant_results.columns]
+    if participant_label_col in participant_results.columns:
+        sort_cols.append(participant_label_col)
+
+    if sort_cols:
+        display_schedule = participant_results.sort_values(sort_cols)[available_schedule_cols].reset_index(drop=True)
+    else:
+        display_schedule = participant_results[available_schedule_cols].reset_index(drop=True)
+
+    if participant_label_col == "Name":
+        display_schedule = display_schedule.rename(columns={"Name": "Participant_Name"})
+
+    try:
+        workbook_bytes, workbook_name = _build_output_workbook(
+            display_schedule,
+            total_balance_score,
+            table_balance_scores,
+        )
+    except Exception as exc:
+        st.error(f"Could not build Excel output: {exc}")
+        workbook_bytes = None
+        workbook_name = None
+
+    if workbook_bytes is not None:
+        st.download_button(
+            "Download Group Assignments (Excel)",
+            data=workbook_bytes,
+            file_name=workbook_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     all_rounds = sorted(schedule_results["Round"].unique().tolist())
     for round_number in all_rounds:
@@ -185,39 +290,6 @@ def render(go_to) -> None:
                         person_name = _clean_text(person_row.get("Name", ""))
                         if person_name:
                             st.write(f"- {person_name}")
-
-    round_count = int(event_setup.get("number_of_rounds", 3))
-    participant_label_col = "Name" if "Name" in participant_results.columns else "Participant_ID"
-    round_table_cols = [f"Round_{r}_Table" for r in range(1, round_count + 1)]
-    schedule_cols = [participant_label_col, *round_table_cols]
-    available_schedule_cols = [col for col in schedule_cols if col in participant_results.columns]
-
-    sort_cols = [col for col in round_table_cols if col in participant_results.columns]
-    if participant_label_col in participant_results.columns:
-        sort_cols.append(participant_label_col)
-
-    if sort_cols:
-        display_schedule = participant_results.sort_values(sort_cols)[available_schedule_cols].reset_index(drop=True)
-    else:
-        display_schedule = participant_results[available_schedule_cols].reset_index(drop=True)
-
-    if participant_label_col == "Name":
-        display_schedule = display_schedule.rename(columns={"Name": "Participant_Name"})
-
-    try:
-        workbook_bytes, workbook_name = _build_output_workbook(display_schedule, total_balance_score)
-    except Exception as exc:
-        st.error(f"Could not build Excel output: {exc}")
-        workbook_bytes = None
-        workbook_name = None
-
-    if workbook_bytes is not None:
-        st.download_button(
-            "Download Group Assignments (Excel)",
-            data=workbook_bytes,
-            file_name=workbook_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
 
     left, right = st.columns(2)
     with left:
