@@ -212,7 +212,6 @@ def render(go_to) -> None:
     participant_results = st.session_state.get("participant_results")
     schedule_results = st.session_state.get("schedule_results")
     objective_value = st.session_state.get("objective_value")
-    optimality_gap = st.session_state.get("optimality_gap")
     diversity_cols = st.session_state.get("characteristics", [])
     event_setup = st.session_state.get("event_setup", {})
 
@@ -222,15 +221,6 @@ def render(go_to) -> None:
 
     total_balance_score = _calculate_total_balance_score(schedule_results, participant_results, diversity_cols)
     table_balance_scores = _calculate_table_balance_scores(schedule_results, participant_results, diversity_cols)
-
-    metrics_col1, metrics_col2 = st.columns(2)
-    with metrics_col1:
-        st.metric("Total Balance Score", f"{total_balance_score:.1f}%")
-    with metrics_col2:
-        if optimality_gap is None:
-            st.metric("Optimality Gap", "N/A")
-        else:
-            st.metric("Optimality Gap", f"{optimality_gap:.2%}")
 
     round_count = int(event_setup.get("number_of_rounds", 3))
     participant_label_col = "Name" if "Name" in participant_results.columns else "Participant_ID"
