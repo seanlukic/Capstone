@@ -6,9 +6,9 @@ from template_parser import _clean_text, table_diversity_score
 
 
 OUTPUT_TEMPLATE_CANDIDATES = [
-    Path(__file__).resolve().parent.parent / "Model_Output_Template.xlsx",
-    Path.home() / "Downloads" / "Model_Output_Template.xlsx",
+    Path(__file__).resolve().parent.parent / "assets" / "Model_Output_Template_3.24.xlsx",
 ]
+OUTPUT_DOWNLOAD_NAME = "Model_Output_Template_3.24.xlsx"
 
 
 def _get_output_template_path() -> Path | None:
@@ -104,7 +104,7 @@ def _build_output_workbook(display_schedule, total_balance_score: float, table_b
     template_path = _get_output_template_path()
     if template_path is None:
         raise FileNotFoundError(
-            "Could not find Model_Output_Template.xlsx in the project folder or Downloads."
+            "Could not find the packaged output template in the repo."
         )
 
     workbook = load_workbook(template_path)
@@ -176,7 +176,7 @@ def _build_output_workbook(display_schedule, total_balance_score: float, table_b
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-    return output.getvalue(), template_path.name
+    return output.getvalue(), OUTPUT_DOWNLOAD_NAME
 
 
 # Step 4: Results page showing the generated group assignments, diversity scores, and allowing users to download the results as CSV.
