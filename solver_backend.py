@@ -51,7 +51,7 @@ def _prepare_parameters(
     df: pd.DataFrame,
     *,
     v_target: float = 5.0,
-    lam: float = 50.0,
+    lam: float = 100.0,
     w1_value: float = 10.0,
     w2_value: float = 20.0,
     w1_bar_value: float | None = None,
@@ -403,6 +403,17 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
             values = [1.0 for _ in T]
             _add_row(model, 1.0, 1.0, indices, values)
 
+    # Prevent participants from staying at the same table in consecutive rounds,
+    # except when a participant is explicitly locked to one table across rounds.
+    for i in I:
+        if i in locked_indices:
+            continue
+        for t in T:
+            for r in range(len(R) - 1):
+                indices = [Y[i, t, r], Y[i, t, r + 1]]
+                values = [1.0, 1.0]
+                _add_row(model, -inf, 1.0, indices, values)
+
     for i, locked_table_idx in locked_indices.items():
         for r in R:
             _add_row(model, 1.0, 1.0, [Y[i, locked_table_idx, r]], [1.0])
@@ -483,7 +494,7 @@ def solve_solver_v2(
     debug: bool = False,
     time_limit_seconds: float | None = None,
     v_target: float = 5.0,
-    lam: float = 50.0,
+    lam: float = 100.0,
     w1_value: float = 10.0,
     w2_value: float = 20.0,
     w1_bar_value: float | None = None,

@@ -221,44 +221,6 @@ def _parse_table_lock_sheet(workbook: pd.ExcelFile, table_count: int) -> dict[st
     return locks
 
 
-# Parses the participant_lock sheet to extract pairs of participants who cannot be seated together.
-def _parse_participant_lock_sheet(workbook: pd.ExcelFile) -> list[tuple[str, str]]:
-    sheet = _find_sheet_name(workbook, "participant_lock", "participant locks")
-    if sheet is None:
-        return []
-
-    locks_df = pd.read_excel(workbook, sheet_name=sheet, header=1)
-    if locks_df.empty:
-        return []
-
-    locks_df.columns = [str(col).strip() for col in locks_df.columns]
-    participant_1_col = None
-    participant_2_col = None
-    for col in locks_df.columns:
-        norm = _normalize_label(col)
-        if participant_1_col is None and norm in {"participant_id1", "participant_1", "participant1"}:
-            participant_1_col = col
-        if participant_2_col is None and norm in {"participant_id2", "participant_2", "participant2"}:
-            participant_2_col = col
-
-    if participant_1_col is None or participant_2_col is None:
-        return []
-
-    separation_pairs: list[tuple[str, str]] = []
-    seen_pairs: set[tuple[str, str]] = set()
-    for _, row in locks_df.iterrows():
-        participant_1 = _clean_text(row.get(participant_1_col, ""))
-        participant_2 = _clean_text(row.get(participant_2_col, ""))
-        if not participant_1 or not participant_2 or participant_1 == participant_2:
-            continue
-        pair = tuple(sorted((participant_1, participant_2)))
-        if pair in seen_pairs:
-            continue
-        seen_pairs.add(pair)
-        separation_pairs.append(pair)
-    return separation_pairs
-
-
 # Normalizes and transforms the raw participants DataFrame, extracting Participant_ID, Name, and characteristic-trait pairs
 # into a clean format suitable for the solver. Also returns the list of characteristics and count of generated IDs.
 def _transform_participants(raw_df: pd.DataFrame, characteristics_from_traits: list[str]) -> tuple[pd.DataFrame, list[str], int]:
@@ -364,7 +326,7 @@ def _transform_participants(raw_df: pd.DataFrame, characteristics_from_traits: l
 
 
 # Parses the uploaded template file to extract event setup, traits configuration,
-# participant data, table locks, and participant separation locks. Returns a structured dictionary of all parsed information.
+# participant data, and table locks. Returns a structured dictionary of all parsed information.
 def _parse_template(uploaded_file) -> dict:
     workbook = pd.ExcelFile(uploaded_file)
     event_setup = _parse_event_setup(workbook)
@@ -375,8 +337,6 @@ def _parse_template(uploaded_file) -> dict:
         traits_config["characteristics"],
     )
     locks = _parse_table_lock_sheet(workbook, event_setup["number_of_tables"])
-    participant_locks = _parse_participant_lock_sheet(workbook)
-
     return {
         "raw_participants": raw_participants,
         "participants_df": participants_df,
@@ -386,7 +346,6 @@ def _parse_template(uploaded_file) -> dict:
         "trait_max_allowed": traits_config["trait_max_allowed"],
         "trait_min_required": traits_config["trait_min_required"],
         "locks": locks,
-        "participant_locks": participant_locks,
         "generated_ids": generated_ids,
     }
 
