@@ -67,7 +67,6 @@ def _prepare_parameters(
     trait_max_allowed: dict | None = None,
     trait_min_required: dict | None = None,
     locked_tables: dict | None = None,
-    separation_pairs: list | None = None,
 ) -> dict:
     work_df = df.copy().reset_index(drop=True)
 
@@ -199,35 +198,6 @@ def _prepare_parameters(
                 w2[k, a, t] = float(w2_value)
 
     locked_indices = {}
-    # Map Participant_ID to index for locked tables and separation pairs
-    id_to_index = {
-        _clean_text(work_df.at[i, "Participant_ID"]): i
-        for i in I
-    }
-
-    separation_indices = set()
-    if separation_pairs:
-        # separation_pairs expected as an iterable of pairs: [(id1, id2), ...]
-        for pair in separation_pairs:
-            try:
-                a_id, b_id = pair
-            except Exception:
-                # skip invalid entries
-                continue
-            a_pid = _clean_text(a_id)
-            b_pid = _clean_text(b_id)
-            if not a_pid or not b_pid or a_pid == b_pid:
-                continue
-            if a_pid not in id_to_index or b_pid not in id_to_index:
-                continue
-            i = id_to_index[a_pid]
-            j = id_to_index[b_pid]
-            if i == j:
-                continue
-            if i > j:
-                i, j = j, i
-            separation_indices.add((i, j))
-
     if locked_tables:
         id_to_index = {
             _clean_text(work_df.at[i, "Participant_ID"]): i
@@ -246,8 +216,7 @@ def _prepare_parameters(
             if table_number < 1 or table_number > len(T):
                 continue
             locked_indices[id_to_index[pid]] = table_number - 1
-    # include separation indices in returned params
-    
+
     return {
         "df": work_df,
         "K": K,
@@ -267,7 +236,6 @@ def _prepare_parameters(
         "w1": w1,
         "w2": w2,
         "locked_indices": locked_indices,
-        "separation_pairs_indices": separation_indices,
     }
 
 
@@ -312,7 +280,6 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     w1 = params["w1"]
     w2 = params["w2"]
     locked_indices = params["locked_indices"]
-    separation_pairs_indices = params["separation_pairs_indices"]
 
     model = highspy.Highs()
     model.setOptionValue("output_flag", False)
@@ -443,11 +410,6 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
     if len(params["df"]) > 0 and 0 not in locked_indices:
         _add_row(model, 1.0, 1.0, [Y[0, 0, 0]], [1.0])
 
-    for i, j in separation_pairs_indices:
-        for t in T:
-            for r in R:
-                _add_row(model, -highspy.kHighsInf, 1.0, [Y[i, t, r], Y[j, t, r]], [1.0, 1.0])
-
     for t in range(len(T) - 1):
         for r in R:
             indices = [W[t, r], W[t + 1, r]]
@@ -537,7 +499,6 @@ def solve_solver_v2(
     trait_max_allowed: dict | None = None,
     trait_min_required: dict | None = None,
     locked_tables: dict | None = None,
-    separation_pairs: list | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, float, float | None]:
     params = _prepare_parameters(
         df,
@@ -558,7 +519,6 @@ def solve_solver_v2(
         trait_max_allowed=trait_max_allowed,
         trait_min_required=trait_min_required,
         locked_tables=locked_tables,
-        separation_pairs=separation_pairs,
     )
     model, Y, W = _build_model(params)
     model.setOptionValue("output_flag", bool(debug))
