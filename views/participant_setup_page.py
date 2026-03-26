@@ -66,6 +66,7 @@ def render(go_to) -> None:
     characteristics = parsed["characteristics"]
     event_setup = parsed["event_setup"]
     locks = parsed["locks"]
+    participant_locks = parsed["participant_locks"]
     st.success(f"Loaded `{uploaded.name}` with {len(participants_df)} participant rows.")
     if parsed["generated_ids"] > 0:
         st.warning(f"Generated {parsed['generated_ids']} missing Participant_ID values as AUTO_*.")
@@ -78,6 +79,7 @@ def render(go_to) -> None:
     st.session_state["trait_max_allowed"] = parsed["trait_max_allowed"]
     st.session_state["trait_min_required"] = parsed["trait_min_required"]
     st.session_state["locks"] = locks
+    st.session_state["participant_locks"] = participant_locks
 
     min_total = event_setup["number_of_tables"] * event_setup["min_people_per_table"]
     max_total = event_setup["number_of_tables"] * event_setup["max_people_per_table"]
@@ -90,7 +92,8 @@ def render(go_to) -> None:
     )
     st.caption(
         f"Traits in model: {len(characteristics)}. "
-        f"Table locks: {len(locks)}."
+        f"Table locks: {len(locks)}. "
+        f"Participant separation locks: {len(participant_locks)}"
     )
 
     st.subheader("Current Participant Data")
@@ -127,6 +130,7 @@ def render(go_to) -> None:
                         trait_max_allowed=parsed["trait_max_allowed"],
                         trait_min_required=parsed["trait_min_required"],
                         locked_tables=locks,
+                        separation_pairs=participant_locks,
                     )
                 except Exception as exc:
                     st.error(f"Solver failed: {exc}")
