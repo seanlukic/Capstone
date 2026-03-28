@@ -169,13 +169,9 @@ def _trait_deviation(
 ) -> float:
     min_required = trait_min_required.get(key)
     max_allowed = trait_max_allowed.get(key)
-    target = trait_targets.get(key)
 
     lower = None if min_required is None else float(min_required)
     upper = None if max_allowed is None else float(max_allowed)
-    if lower is None and upper is None and target is not None:
-        lower = float(target)
-        upper = float(target)
 
     deviation = 0.0
     if lower is not None and actual_count < lower:
@@ -244,7 +240,7 @@ def _write_trait_deviation_view(
     _copy_cell_format(body_label_template, description_cell)
     description_cell.value = (
         "Count shows the number of assigned participants with each trait. "
-        "Deviation is 0 inside the configured min/max range and uses the target as an exact goal when no range is configured."
+        "Deviation is 0 inside the configured min/max range and equals the distance outside that range."
     )
 
     worksheet.column_dimensions["A"].width = 14
