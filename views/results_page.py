@@ -98,6 +98,75 @@ def _clear_sheet_rows(worksheet, start_row: int) -> None:
             worksheet.cell(row=row_idx, column=col_idx).value = None
 
 
+def _write_current_assignments_view(workbook, display_schedule, event_setup: dict) -> None:
+    if "Current Assignments" not in workbook.sheetnames:
+        raise ValueError("Output template is missing the 'Current Assignments' sheet.")
+
+    worksheet = workbook["Current Assignments"]
+    title_template = worksheet["A1"]
+    header_template = worksheet["A5"]
+    text_body_template = worksheet["A6"]
+    number_body_template = worksheet["B6"]
+
+    for merged_range in list(worksheet.merged_cells.ranges):
+        worksheet.unmerge_cells(str(merged_range))
+
+    round_columns = [column for column in display_schedule.columns if column.startswith("Round_")]
+    round_count = len(round_columns)
+    participant_count = len(display_schedule)
+    configured_table_count = int(event_setup.get("number_of_tables", 0) or 0)
+    detected_table_count = 0
+    if round_columns:
+        detected_table_count = int(
+            display_schedule[round_columns]
+            .stack()
+            .dropna()
+            .astype(int)
+            .nunique()
+        )
+    table_count = configured_table_count or detected_table_count
+
+    max_col = max(1, len(display_schedule.columns))
+    clear_end_row = max(worksheet.max_row, 6 + participant_count + 50)
+    clear_end_col = max(worksheet.max_column, max_col + 5)
+    for row_idx in range(1, clear_end_row + 1):
+        for col_idx in range(1, clear_end_col + 1):
+            worksheet.cell(row=row_idx, column=col_idx).value = None
+
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    title_cell = worksheet.cell(row=1, column=1)
+    _copy_cell_format(title_template, title_cell)
+    title_cell.value = "Seating Assignments (by Round)"
+
+    worksheet.merge_cells(start_row=3, start_column=1, end_row=3, end_column=max_col)
+    summary_cell = worksheet.cell(row=3, column=1)
+    _copy_cell_format(text_body_template, summary_cell)
+    summary_cell.value = (
+        f"Participants: {participant_count} | "
+        f"Rounds: {round_count} | "
+        f"Tables: {table_count}"
+    )
+
+    worksheet.column_dimensions["A"].width = 22
+    for col_idx, column_name in enumerate(display_schedule.columns, start=1):
+        header_cell = worksheet.cell(row=5, column=col_idx)
+        _copy_cell_format(header_template, header_cell)
+        header_cell.value = column_name
+        if col_idx > 1:
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 14
+
+    for row_offset, (_, row) in enumerate(display_schedule.iterrows(), start=1):
+        target_row = 5 + row_offset
+        for col_idx, column_name in enumerate(display_schedule.columns, start=1):
+            value = row[column_name]
+            cell = worksheet.cell(row=target_row, column=col_idx)
+            template_cell = text_body_template if col_idx == 1 else number_body_template
+            _copy_cell_format(template_cell, cell)
+            cell.value = value
+
+    worksheet.freeze_panes = "A6"
+
+
 def _ordered_trait_keys(
     participant_results,
     characteristics: list[str],
@@ -411,6 +480,7 @@ def _build_output_workbook(
     total_balance_std_dev: float,
     participant_results,
     schedule_results,
+    event_setup: dict,
     characteristics: list[str],
     trait_targets: dict,
     trait_max_allowed: dict,
@@ -423,35 +493,7 @@ def _build_output_workbook(
         )
 
     workbook = load_workbook(template_path)
-    if "Current Assignments" not in workbook.sheetnames:
-        raise ValueError("Output template is missing the 'Current Assignments' sheet.")
-
-    worksheet = workbook["Current Assignments"]
-    expected_columns = display_schedule.columns.tolist()
-    header_row = None
-    header_columns = {}
-
-    for row_idx in range(1, worksheet.max_row + 1):
-        row_values = [worksheet.cell(row=row_idx, column=col_idx).value for col_idx in range(1, worksheet.max_column + 1)]
-        row_headers = {_clean_text(value): col_idx for col_idx, value in enumerate(row_values, start=1) if _clean_text(value)}
-        if expected_columns and all(column in row_headers for column in expected_columns):
-            header_row = row_idx
-            header_columns = row_headers
-            break
-
-    if header_row is None:
-        raise ValueError(
-            "Could not find the assignment header row in 'Current Assignments'."
-        )
-
-    max_clear_row = max(worksheet.max_row, header_row + len(display_schedule) + 50)
-    for row_idx in range(header_row + 1, max_clear_row + 1):
-        for column in expected_columns:
-            worksheet.cell(row=row_idx, column=header_columns[column]).value = None
-
-    for row_offset, (_, row) in enumerate(display_schedule.iterrows(), start=1):
-        for column in expected_columns:
-            worksheet.cell(row=header_row + row_offset, column=header_columns[column]).value = row[column]
+    _write_current_assignments_view(workbook, display_schedule, event_setup)
 
     if "Total Balance Score" not in workbook.sheetnames:
         raise ValueError("Output template is missing the 'Total Balance Score' sheet.")
@@ -549,6 +591,7 @@ def render(go_to) -> None:
             total_balance_std_dev,
             participant_results,
             schedule_results,
+            event_setup,
             diversity_cols,
             trait_targets,
             trait_max_allowed,
