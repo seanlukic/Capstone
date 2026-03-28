@@ -107,7 +107,7 @@ def render(go_to) -> None:
             f"{event_setup['min_people_per_table']}-{event_setup['max_people_per_table']}."
         )
     else:
-        st.info("Group assignments can take up to 3 minutes to generate.")
+        st.info("Group assignments can take up to 10 minutes to generate.")
 
     left, right = st.columns(2)
     with left:
@@ -120,7 +120,7 @@ def render(go_to) -> None:
                     participant_results, schedule_results, objective_value, optimality_gap = solve_solver_v2(
                         participants_df,
                         debug=True,
-                        time_limit_seconds=180.0,
+                        time_limit_seconds=600.0,
                         characteristics=characteristics,
                         num_tables=event_setup["number_of_tables"],
                         num_rounds=event_setup["number_of_rounds"],
