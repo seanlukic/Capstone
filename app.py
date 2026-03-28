@@ -1,6 +1,5 @@
 import streamlit as st
 
-from views.event_setup_page import render as render_event_setup_page
 from views.landing_page import render as render_landing_page
 from views.participant_setup_page import render as render_participant_setup_page
 from views.results_page import render as render_results_page
@@ -277,7 +276,7 @@ def inject_global_styles() -> None:
     )
 
 
-def render_progress(current_step: int, total_steps: int = 4) -> None:
+def render_progress(current_step: int, total_steps: int = 3) -> None:
     progress_value = max(0.0, min(1.0, current_step / total_steps))
     st.progress(progress_value)
     st.caption(f"Step {current_step} of {total_steps}")
@@ -306,7 +305,7 @@ def start_over() -> None:
 
 def _render_step(step: int, render_fn) -> None:
     st.session_state["step"] = step
-    render_progress(step, total_steps=4)
+    render_progress(step, total_steps=3)
 
     if step > 1: 
         col_back, col_over, _ = st.columns([1.2, 1.5, 7.3])
@@ -324,35 +323,28 @@ def _landing_route() -> None:
     _render_step(1, render_landing_page)
 
 
-def _event_setup_route() -> None:
-    _render_step(2, render_event_setup_page)
-
-
 def _participant_setup_route() -> None:
-    _render_step(3, render_participant_setup_page)
+    _render_step(2, render_participant_setup_page)
 
 
 def _results_route() -> None:
-    _render_step(4, render_results_page)
+    _render_step(3, render_results_page)
 
 
 st.session_state.setdefault("step", 1)
-st.session_state.setdefault("event_name", "")
 
 landing_page = st.Page(_landing_route, title="Landing", url_path="landing", default=True)
-event_setup_page = st.Page(_event_setup_route, title="Event Setup", url_path="event-setup")
 participant_setup_page = st.Page(_participant_setup_route, title="Participant Setup", url_path="participant-setup")
 results_page = st.Page(_results_route, title="Results", url_path="results")
 
 PAGE_BY_STEP = {
     1: landing_page,
-    2: event_setup_page,
-    3: participant_setup_page,
-    4: results_page,
+    2: participant_setup_page,
+    3: results_page,
 }
 
 current_page = st.navigation(
-    [landing_page, event_setup_page, participant_setup_page, results_page],
+    [landing_page, participant_setup_page, results_page],
     position="hidden",
 )
 current_page.run()

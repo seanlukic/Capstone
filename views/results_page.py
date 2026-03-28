@@ -603,12 +603,16 @@ def render(go_to) -> None:
         workbook_name = None
 
     if workbook_bytes is not None:
-        st.download_button(
-            "Download Group Assignments (Excel)",
-            data=workbook_bytes,
-            file_name=workbook_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        download_col, info_col = st.columns([1.2, 1])
+        with download_col:
+            st.download_button(
+                "Download Group Assignments (Excel)",
+                data=workbook_bytes,
+                file_name=workbook_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        with info_col:
+            st.info("Download the Excel file to see a detailed summary of group assignments.")
 
     all_rounds = sorted(schedule_results["Round"].unique().tolist())
     for round_number in all_rounds:
@@ -635,6 +639,6 @@ def render(go_to) -> None:
     left, right = st.columns(2)
     with left:
         if st.button("Back to Participants"):
-            go_to(3)
+            go_to(2)
     with right:
         st.info("If needed, go back and change participant data to regenerate groups.")

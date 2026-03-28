@@ -111,8 +111,8 @@ def render(go_to) -> None:
 
     left, right = st.columns(2)
     with left:
-        if st.button("Back to Event Setup"):
-            go_to(2)
+        if st.button("Back to Landing"):
+            go_to(1)
     with right:
         if st.button("Generate Groupings", type="primary", disabled=invalid_count):
             with st.spinner("Solving group assignments..."):
@@ -120,7 +120,7 @@ def render(go_to) -> None:
                     participant_results, schedule_results, objective_value, optimality_gap = solve_solver_v2(
                         participants_df,
                         debug=True,
-                        time_limit_seconds=600.0,
+                        time_limit_seconds=6.0,
                         characteristics=characteristics,
                         num_tables=event_setup["number_of_tables"],
                         num_rounds=event_setup["number_of_rounds"],
@@ -140,4 +140,4 @@ def render(go_to) -> None:
             st.session_state["schedule_results"] = schedule_results
             st.session_state["objective_value"] = objective_value
             st.session_state["optimality_gap"] = optimality_gap
-            go_to(4)
+            go_to(3)
