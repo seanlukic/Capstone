@@ -310,7 +310,12 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
 
     inf = highspy.kHighsInf
 
-# Decision variables:
+    # Decision variables from the formulation:
+    # Y -> assignment variable
+    # W -> table-used variable
+    # E1_bar, E2_bar, E1, E2 -> over/under target deviation variables
+    # P -> same-table-in-round indicator
+    # H -> ever-met-across-rounds indicator
     Y = {}
     for i in I:
         for t in T:
@@ -332,6 +337,8 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                 integrality=highspy.HighsVarType.kInteger,
             )
 
+    # Formulation objective (1):
+    # E1_bar / E2_bar / E1 / E2 carry the weighted overuse/underuse penalties.
     E1_bar = {}
     for k in K:
         for a in Ak[k]:
@@ -393,9 +400,15 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                         model,
                         lb=0.0,
                         ub=1.0,
+                        cost=lam,
                         integrality=highspy.HighsVarType.kInteger,
                     )
 
+    # Formulation objective (1):
+    # Repeated meetings should be penalized, but a first meeting should not.
+    # Using +lambda on each round-level pairing P and -lambda on H makes the
+    # contribution equal to lambda * (number of meetings - 1) for pairs that
+    # meet at least once.
     H = {}
     for i in I:
         for j in I:
@@ -404,30 +417,34 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                     model,
                     lb=0.0,
                     ub=1.0,
-                    cost=lam,
+                    cost=-lam,
                     integrality=highspy.HighsVarType.kInteger,
                 )
 
+    # Formulation constraint (2): lower bound on table size when table (t, r) is used.
     for t in T:
         for r in R:
             indices = [Y[i, t, r] for i in I] + [W[t, r]]
             values = [1.0 for _ in I] + [-float(l)]
             _add_row(model, 0.0, inf, indices, values)
 
+    # Formulation constraint (3): upper bound on table size when table (t, r) is used.
     for t in T:
         for r in R:
             indices = [Y[i, t, r] for i in I] + [W[t, r]]
             values = [1.0 for _ in I] + [-float(u)]
             _add_row(model, -inf, 0.0, indices, values)
 
+    # Formulation constraint (4): each person is assigned to exactly one table per round.
     for i in I:
         for r in R:
             indices = [Y[i, t, r] for t in T]
             values = [1.0 for _ in T]
             _add_row(model, 1.0, 1.0, indices, values)
 
-    # Prevent participants from staying at the same table in consecutive rounds,
-    # except when a participant is explicitly locked to one table across rounds.
+    # Extension beyond the base formulation:
+    # prevent participants from staying at the same table in consecutive rounds,
+    # except when they are explicitly locked to one table across rounds.
     for i in I:
         if i in locked_indices:
             continue
@@ -437,24 +454,29 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                 values = [1.0, 1.0]
                 _add_row(model, -inf, 1.0, indices, values)
 
+    # Extension beyond the base formulation: enforce user-provided table locks.
     for i, locked_table_idx in locked_indices.items():
         for r in R:
             _add_row(model, 1.0, 1.0, [Y[i, locked_table_idx, r]], [1.0])
 
+    # Formulation constraint (5): anchor one person to break symmetry and speed up solving.
     if len(params["df"]) > 0 and 0 not in locked_indices:
         _add_row(model, 1.0, 1.0, [Y[0, 0, 0]], [1.0])
 
+    # Formulation constraint (10): separation lock pairs must never share a table in any round.
     for i, j in separation_pairs_indices:
         for t in T:
             for r in R:
                 _add_row(model, -highspy.kHighsInf, 1.0, [Y[i, t, r], Y[j, t, r]], [1.0, 1.0])
 
+    # Formulation constraint (6): symmetry breaking so used tables fill sequentially.
     for t in range(len(T) - 1):
         for r in R:
             indices = [W[t, r], W[t + 1, r]]
             values = [1.0, -1.0]
             _add_row(model, 0.0, inf, indices, values)
 
+    # Formulation constraint (7): track over/under deviations from target attribute counts.
     for k in K:
         for a in Ak[k]:
             for t in T:
@@ -469,6 +491,7 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                     values.extend([-1.0, -1.0, 1.0, 1.0])
                     _add_row(model, float(v[k, a, t]), float(v[k, a, t]), indices, values)
 
+    # Extension beyond the base formulation: optional hard upper bounds on trait counts.
     if v_bar is not None:
         for k in K:
             for a in Ak[k]:
@@ -483,6 +506,7 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                         if indices:
                             _add_row(model, -inf, float(v_bar[k, a, t]), indices, values)
 
+    # Extension beyond the base formulation: optional hard lower bounds on trait counts.
     if v_under is not None:
         for k in K:
             for a in Ak[k]:
@@ -497,6 +521,8 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                         if indices:
                             _add_row(model, float(v_under[k, a, t]), inf, indices, values)
 
+    # Formulation constraint (8): P[i, j, r] = 1 if and only if people i and j
+    # sit together at the same table in round r.
     for i in I:
         for j in I:
             if j > i:
@@ -506,6 +532,30 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                         values = [1.0, -1.0, -1.0]
                         _add_row(model, -1.0, inf, indices, values)
 
+    # Formulation constraint (8), upper-link half:
+    # if i is at table t and j is not, then P[i, j, r] must be 0.
+    for i in I:
+        for j in I:
+            if j > i:
+                for t in T:
+                    for r in R:
+                        indices = [P[i, j, r], Y[i, t, r], Y[j, t, r]]
+                        values = [1.0, 1.0, -1.0]
+                        _add_row(model, -inf, 1.0, indices, values)
+
+    # Formulation constraint (8), upper-link half:
+    # if j is at table t and i is not, then P[i, j, r] must be 0.
+    for i in I:
+        for j in I:
+            if j > i:
+                for t in T:
+                    for r in R:
+                        indices = [P[i, j, r], Y[i, t, r], Y[j, t, r]]
+                        values = [1.0, -1.0, 1.0]
+                        _add_row(model, -inf, 1.0, indices, values)
+
+    # Formulation constraint (9): if people i and j are together in any round,
+    # then H[i, j] must be 1.
     for i in I:
         for j in I:
             if j > i:
@@ -513,6 +563,14 @@ def _build_model(params: dict) -> tuple[highspy.Highs, dict, dict]:
                     indices = [H[i, j], P[i, j, r]]
                     values = [1.0, -1.0]
                     _add_row(model, 0.0, inf, indices, values)
+
+    # Keep H at 0 unless the pair meets in at least one round.
+    for i in I:
+        for j in I:
+            if j > i:
+                indices = [H[i, j]] + [P[i, j, r] for r in R]
+                values = [1.0] + [-1.0 for _ in R]
+                _add_row(model, -inf, 0.0, indices, values)
 
     return model, Y, W
 
