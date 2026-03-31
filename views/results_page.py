@@ -12,7 +12,7 @@ OUTPUT_TEMPLATE_CANDIDATES = [
     Path(__file__).resolve().parent.parent / "assets" / "Model_Output_Template_3.25.xlsx",
     Path(__file__).resolve().parent.parent / "assets" / "Model_Output_Template_3.24.xlsx",
 ]
-OUTPUT_DOWNLOAD_NAME = "Model_Output_Template_3.25.xlsx"
+OUTPUT_DOWNLOAD_NAME = "Model_Output_Template.xlsx"
 
 
 def _get_output_template_path() -> Path | None:
